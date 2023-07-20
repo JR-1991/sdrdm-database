@@ -153,4 +153,4 @@ cython_debug/
 
 
 # Ignore examples
-examples/postgres/data/** !Resources/**/*.foo
+examples/postgres/data/*
