@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "sdrdm_database"
+version = "0.1.0"
+description = "An sdRDM-based framework to utilize databases"
+authors = ["Jan Range <30547301+JR-1991@users.noreply.github.com>"]
+license = "MIT License"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pydantic = "1.10"
+ibis-framework = {extras = ["postgres"], version = "^7.0.0"}
+
+[tool.poetry.extras]
+duckdb = ["duckdb"]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
