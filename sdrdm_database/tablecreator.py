@@ -97,22 +97,25 @@ def _create_table_schema(
     _handle_foreign_keys(
         parent=parent,
         table_name=table_name,
-        schema=schema,
         db_connector=db_connector,
         fk_commands=fk_commands,
     )
 
     for attr in data_model.__fields__.values():
+        is_obj = hasattr(attr.type_, "__fields__")
+
         if attr.name == "id":
             continue
-
-        _populate_schema(
-            attr=attr,
-            schema=schema,
-            table_name=table_name,
-            schemes=schemes,
-            db_connector=db_connector,
-        )
+        elif is_obj:
+            _create_table_schema(
+                db_connector=db_connector,
+                data_model=attr.type_,
+                table_name=attr.name,
+                schemes=schemes,
+                parent=table_name,
+            )
+        else:
+            _populate_schema(attr=attr, schema=schema)
 
     pk_fun = partial(
         db_connector.__commands__.add_primary_key,
@@ -136,7 +139,6 @@ def _create_table_schema(
 def _handle_foreign_keys(
     parent: str,
     table_name: str,
-    schema: Dict,
     db_connector: DBConnector,
     fk_commands: List,
 ):
@@ -175,9 +177,6 @@ def _handle_foreign_keys(
 def _populate_schema(
     attr,
     schema: Dict,
-    table_name: str,
-    schemes: List[Dict],
-    db_connector: DBConnector,
 ) -> None:
     """
     Populates the schema dictionary with the attribute name and its corresponding type.
@@ -193,22 +192,10 @@ def _populate_schema(
     """
     name = attr.name
     is_required = bool(attr.required)
-    is_obj = hasattr(attr.type_, "__fields__")
-
-    if is_obj:
-        _create_table_schema(
-            db_connector=db_connector,
-            data_model=attr.type_,
-            table_name=name,
-            schemes=schemes,
-            parent=table_name,
-        )
-
-    else:
-        schema[name] = _map_type(
-            attr.type_,
-            is_required,
-        )
+    schema[name] = _map_type(
+        attr.type_,
+        is_required,
+    )
 
 
 def _map_type(
@@ -225,7 +212,10 @@ def _map_type(
     Returns:
         The corresponding type string for the given data type.
     """
-    mapped_type = TYPE_MAPPING.get(dtype, "string")
+    mapped_type = TYPE_MAPPING.get(dtype, "NOT_SUPPORTED")
+
+    if mapped_type == "NOT_SUPPORTED":
+        raise ValueError(f"Type '{dtype}' is not supported yet.")
 
     if required:
         return "!" + mapped_type
