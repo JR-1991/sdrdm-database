@@ -25,7 +25,7 @@ jobs:
         run: |
             pytest -v -m integration
     services:
-      redis:
+      db:
         image: mysql:5.7
         env:
           MYSQL_DATABASE: 'db'
