@@ -19,6 +19,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install git+https://github.com/JR-1991/software-driven-rdm.git@linking-refactor
           pip install pytest
+          pip install ibis-framework[mysql]
           pip install -e .
 
       - name: Run tests with pytest
