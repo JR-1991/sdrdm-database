@@ -1,4 +1,4 @@
-name: MySQL integration test
+name: Integration Tests
 
 on: [push, pull_request]
 
