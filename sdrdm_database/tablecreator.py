@@ -58,8 +58,6 @@ def create_tables(db_connector: "DBConnector", model: DataModel):
 
         fk_commands += instruction["fk_commands"]
 
-    print(db_connector.connection.table("ProteinSequence"))
-
     for command in fk_commands:
         command()
 
