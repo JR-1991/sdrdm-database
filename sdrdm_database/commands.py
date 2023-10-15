@@ -46,6 +46,9 @@ class MySQLCommands(MetaCommands):
     ):
         try:
             con.raw_sql(
+                f"ALTER TABLE {table_name} ADD COLUMN {foreign_key} INT NOT NULL;"
+            )
+            con.raw_sql(
                 f"ALTER TABLE {table_name} ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});"
             )
         except Exception as e:
@@ -77,6 +80,9 @@ class PostgresCommands(MetaCommands):
         con: "BaseAlchemyBackend",
     ):
         try:
+            con.raw_sql(
+                f"ALTER TABLE {table_name} ADD COLUMN {foreign_key} INT NOT NULL;"
+            )
             con.raw_sql(
                 f"ALTER TABLE {table_name} ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});"
             )

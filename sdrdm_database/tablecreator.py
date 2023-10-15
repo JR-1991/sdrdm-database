@@ -7,6 +7,8 @@ from functools import partial
 
 from .dbconnector import DBConnector
 
+from pprint import pprint as print
+
 TYPE_MAPPING = {
     str: "string",
     float: "float64",
@@ -37,21 +39,26 @@ def create_tables(db_connector: "DBConnector", model: DataModel):
 
     # Create tables and add foreign keys
     fk_commands = []
+    tables = db_connector.connection.list_tables()
 
-    for instruction in create_instructions:
+    for instruction in create_instructions[::-1]:
         table_name = instruction["name"]
         schema = ibis.schema(instruction["schema"])  # type: ignore
 
-        # Create the table
-        db_connector.connection.create_table(
-            table_name,
-            schema=schema,
-        )
+        if table_name not in tables:
+            # Create the table
+            db_connector.connection.create_table(
+                table_name,
+                schema=schema,
+            )
 
-        # Create primary key
-        instruction["pk_command"]()
+            # Create primary key
+            instruction["pk_command"]()
+            tables.append(table_name)
 
         fk_commands += instruction["fk_commands"]
+
+    print(db_connector.connection.table("ProteinSequence"))
 
     for command in fk_commands:
         command()
@@ -106,6 +113,7 @@ def _create_table_schema(
             schema=schema,
             table_name=table_name,
             schemes=schemes,
+            db_connector=db_connector,
         )
 
     pk_fun = partial(
@@ -150,7 +158,6 @@ def _handle_foreign_keys(
     if not parent:
         return
 
-    schema[parent] = "int64"
     kwargs = {
         "table_name": table_name,
         "foreign_key": parent,
@@ -167,14 +174,12 @@ def _handle_foreign_keys(
     )
 
 
-from typing import Dict, List
-
-
 def _populate_schema(
     attr,
     schema: Dict,
     table_name: str,
     schemes: List[Dict],
+    db_connector: DBConnector,
 ) -> None:
     """
     Populates the schema dictionary with the attribute name and its corresponding type.
@@ -194,10 +199,11 @@ def _populate_schema(
 
     if is_obj:
         _create_table_schema(
-            attr.type_,
-            name,
-            schemes,
-            table_name,
+            db_connector=db_connector,
+            data_model=attr.type_,
+            table_name=name,
+            schemes=schemes,
+            parent=table_name,
         )
 
     else:
