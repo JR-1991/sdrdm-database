@@ -38,7 +38,7 @@ def test_mysql():
     }
 
     expected = {
-        "id": "!int32",
+        "id": "!string",
         "name": "string",
         "int_value": "int64",
         "float_value": "float64",
@@ -49,11 +49,16 @@ def test_mysql():
 
     # Add data
     obj = lib.Test(
-        id=0, int_value=1, float_value=1.0, bool_value=True, name="Hello"
-    ).dict(exclude_unset=True)
+        int_value=1,
+        float_value=1.0,
+        bool_value=True,
+        name="Hello",
+    )
 
-    db.connection.insert("Test", [obj])
+    db.insert(obj)
 
-    expected = {**obj, "id": 1}
+    expected = {**obj.dict(exclude_unset=True), "id": str(obj.__id__)}
+
     entry = db.connection.table("Test").execute().loc[0].to_dict()
+
     assert entry == expected, f"Expected entry '{expected}' but got '{entry}'"
