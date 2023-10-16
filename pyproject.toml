@@ -9,7 +9,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.9"
 pydantic = "1.10"
-ibis-framework = "^7.0.0"
+ibis-framework = {extras = ["mysql"], version = "^7.0.0"}
 
 [tool.poetry.extras]
 mysql = ["pymysql"]
