@@ -23,3 +23,4 @@ pip install git+https://github.com/JR-1991/sdrdm-database.git
 
 * [Setting up a MySQL database and add an EnzymeML model](./examples/mysql/)
 * [Setting up a PostgreSQL database and add an EnzymeML model](./examples/postgres/)
+* [Dealing with nested data models](./examples/nested-data/)
