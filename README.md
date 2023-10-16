@@ -9,8 +9,14 @@ This is the sdRDM DB interface to create tables from a markdown model and insert
 To get started with the sdRDM DB interface, you can install it via pip:
 
 ```bash
-# PyPI
+# Base installation
 pip install sdrdm_database
+
+# MySQL
+pip install "sdrdm_database[mysql]"
+
+# PostgreSQL
+pip install "sdrdm_database[postgres]"
 ```
 
 or directly from the GitHub repository:
@@ -23,3 +29,4 @@ pip install git+https://github.com/JR-1991/sdrdm-database.git
 
 * [Setting up a MySQL database and add an EnzymeML model](./examples/mysql/)
 * [Setting up a PostgreSQL database and add an EnzymeML model](./examples/postgres/)
+* [Dealing with nested data models](./examples/nested-data/)
