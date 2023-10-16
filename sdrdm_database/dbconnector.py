@@ -7,6 +7,7 @@ from pydantic import BaseModel, PrivateAttr
 from enum import Enum
 
 from sdrdm_database import commands
+from sdrdm_database.dataio import insert_into_database
 
 
 class SupportedBackends(str, Enum):
@@ -152,3 +153,22 @@ class DBConnector(BaseModel):
                 f"Invalid database type: {self.dbtype}. "
                 f"Supported types are: {COMMAND_MAPPER.keys()}"
             )
+
+    def insert(self, *datasets: "DataModel", verbose: bool = False):
+        """Inserts data into the database.
+
+        Args:
+            table_name (str): The name of the table to insert the data into.
+            data (dict): The data to insert into the database.
+        """
+
+        for dataset in datasets:
+            try:
+                insert_into_database(dataset=dataset, db=self)
+
+                if verbose:
+                    print(
+                        f"Added dataset {dataset.__class__.__name__} ({str(dataset.__id__)})"
+                    )
+            except Exception as e:
+                raise ValueError(f"Could not insert data into database: {e}") from e
