@@ -38,7 +38,7 @@ def test_mysql():
     }
 
     expected = {
-        "id": "!string",
+        "Test_id": "!string",
         "name": "string",
         "int_value": "int64",
         "float_value": "float64",
@@ -58,7 +58,7 @@ def test_mysql():
 
     db.insert(obj)
 
-    expected = {**obj.dict(exclude_unset=True), "id": str(obj.__id__)}
+    expected = {**obj.dict(exclude_unset=True), "Test_id": str(obj.__id__)}
     del expected["multiple_values"]
 
     entry = db.connection.table("Test").execute().loc[0].to_dict()

@@ -77,9 +77,9 @@ def test_handle_foreign_keys():
 
     expected_kwargs = {
         "table_name": table_name,
-        "foreign_key": parent,
-        "reference_table": parent,
-        "reference_column": "id",
+        "foreign_key": f"{parent}_id",
+        "reference_table": "parent",
+        "reference_column": f"{parent}_id",
         "con": db_connector.connection,
     }
 
@@ -112,7 +112,7 @@ def test_create_table_schema():
     expected_pk = partial(
         db_connector.__commands__.add_primary_key,
         table_name=table_name,
-        primary_key="id",
+        primary_key=f"{table_name}_id",
         con=db_connector.connection,
     )
 
