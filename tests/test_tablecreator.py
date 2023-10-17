@@ -120,6 +120,7 @@ def test_create_table_schema():
         "name": "table_name",
         "schema": {"foo": "!string", "bar": "int64"},
         "fk_commands": [],
+        "is_primitive": False,
     }
 
     assert result == [expected_schema]
