@@ -4,10 +4,10 @@ from sdRDM import DataModel
 from typing import Optional, List, Dict
 from datetime import datetime, date
 from functools import partial
+from typing import get_origin
+from pydantic import create_model
 
 from .dbconnector import DBConnector
-
-from pprint import pprint as print
 
 TYPE_MAPPING = {
     str: "string",
@@ -19,7 +19,7 @@ TYPE_MAPPING = {
 }
 
 
-def create_tables(db_connector: "DBConnector", model: DataModel):
+def create_tables(db_connector: "DBConnector", model: "DataModel"):
     """Creates tables according to the given sdRDM data model.
 
     Args:
@@ -52,8 +52,9 @@ def create_tables(db_connector: "DBConnector", model: DataModel):
                 schema=schema,
             )
 
-            # Create primary key
-            instruction["pk_command"]()
+            if instruction["is_primitive"] is False:
+                instruction["pk_command"]()
+
             tables.append(table_name)
 
         fk_commands += instruction["fk_commands"]
@@ -78,6 +79,7 @@ def _create_table_schema(
     table_name: str,
     schemes: List[Dict],
     parent: Optional[str] = None,
+    is_primitive: bool = False,
 ):
     """Creates a table schema for a given DataModel object.
 
@@ -103,9 +105,22 @@ def _create_table_schema(
 
     for attr in data_model.__fields__.values():
         is_obj = hasattr(attr.type_, "__fields__")
+        is_multiple = get_origin(attr.outer_type_) is list
 
         if attr.name == "id":
             continue
+        elif is_multiple and not is_obj:
+            _create_table_schema(
+                db_connector=db_connector,
+                data_model=create_model(
+                    attr.name,
+                    **{attr.name: (attr.type_, ...)},
+                ),
+                table_name=attr.name,
+                schemes=schemes,
+                parent=table_name,
+                is_primitive=True,
+            )
         elif is_obj:
             _create_table_schema(
                 db_connector=db_connector,
@@ -130,6 +145,7 @@ def _create_table_schema(
             "schema": schema,
             "pk_command": pk_fun,
             "fk_commands": fk_commands,
+            "is_primitive": is_primitive,
         }
     )
 
