@@ -135,7 +135,7 @@ def _create_table_schema(
     pk_fun = partial(
         db_connector.__commands__.add_primary_key,
         table_name=table_name,
-        primary_key="id",
+        primary_key=f"{table_name}_id",
         con=db_connector.connection,
     )
 
@@ -176,9 +176,9 @@ def _handle_foreign_keys(
 
     kwargs = {
         "table_name": table_name,
-        "foreign_key": parent,
+        "foreign_key": f"{parent}_id",
         "reference_table": parent,
-        "reference_column": "id",
+        "reference_column": f"{parent}_id",
         "con": db_connector.connection,
     }
 
