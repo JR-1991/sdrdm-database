@@ -1,5 +1,7 @@
 import collections
-from typing import get_origin
+from functools import partial
+from typing import Any, List, get_origin
+from uuid import uuid4
 
 
 def insert_into_database(
@@ -24,6 +26,7 @@ def insert_into_database(
 
     sub_objects = {}
     to_exclude = set(["id"])
+    post_insert = []
 
     for key, value in dataset:
         field_info = dataset.__fields__[key]
@@ -33,6 +36,17 @@ def insert_into_database(
         if is_obj:
             sub_objects[key] = [value] if not is_mutliple else value
             to_exclude.add(key)
+        elif is_mutliple and not is_obj:
+            kwargs = {
+                "table": key,
+                "array": value,
+                "db": db,
+                "parent_col": table_name,
+                "parent_id": str(dataset.__id__),
+            }
+
+            post_insert.append(partial(_insert_primitive_array, **kwargs))
+            to_exclude.add(key)
 
     to_insert = {**dataset.dict(exclude=to_exclude), "id": str(dataset.__id__)}
 
@@ -41,6 +55,9 @@ def insert_into_database(
         to_insert[parent_col] = parent_id
 
     db.connection.insert(table_name, to_insert)
+
+    for func in post_insert:
+        func()
 
     for sub_table, sub_data in sub_objects.items():
         for sub_dataset in sub_data:
@@ -74,3 +91,18 @@ def _is_empty(obj):
         ).values()
         == {}
     )
+
+
+def _insert_primitive_array(
+    table: str,
+    array: List[Any],
+    db: "DBConnector",
+    parent_col: str,
+    parent_id: str,
+) -> None:
+    for value in array:
+        to_insert = {
+            table: value,
+            parent_col: parent_id,
+        }
+        db.connection.insert(table, to_insert)
