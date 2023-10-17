@@ -41,18 +41,21 @@ def insert_into_database(
                 "table": key,
                 "array": value,
                 "db": db,
-                "parent_col": table_name,
+                "parent_col": f"{table_name}_id",
                 "parent_id": str(dataset.__id__),
             }
 
             post_insert.append(partial(_insert_primitive_array, **kwargs))
             to_exclude.add(key)
 
-    to_insert = {**dataset.dict(exclude=to_exclude), "id": str(dataset.__id__)}
+    to_insert = {
+        **dataset.dict(exclude=to_exclude),
+        f"{table_name}_id": str(dataset.__id__),
+    }
 
     if parent_id is not None:
         assert parent_col is not None, "Parent column must be specified"
-        to_insert[parent_col] = parent_id
+        to_insert[f"{parent_col}_id"] = parent_id
 
     db.connection.insert(table_name, to_insert)
 
