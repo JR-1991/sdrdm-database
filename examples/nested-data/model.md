@@ -13,6 +13,10 @@ This is an example of a nested data structure.
   - Type: Nested
   - Description: Nested object
   - Multiple: True
+- some_values
+  - Type: string
+  - Description: Some values
+  - Multiple: True
 
 ### Nested
 
