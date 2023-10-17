@@ -25,7 +25,7 @@ def test_mysql():
     create_tables(db_connector=db, model=lib.Test)
 
     # Check tables
-    expected_tables = set(["Test", "nested"])
+    expected_tables = set(["Test", "nested", "multiple_values"])
     assert (
         set(db.connection.list_tables()) == expected_tables
     ), f"Expected tables '{expected_tables}' but got '{db.connection.list_tables()}'"
@@ -53,12 +53,19 @@ def test_mysql():
         float_value=1.0,
         bool_value=True,
         name="Hello",
+        multiple_values=[1, 2, 3],
     )
 
     db.insert(obj)
 
     expected = {**obj.dict(exclude_unset=True), "id": str(obj.__id__)}
+    del expected["multiple_values"]
 
     entry = db.connection.table("Test").execute().loc[0].to_dict()
 
     assert entry == expected, f"Expected entry '{expected}' but got '{entry}'"
+
+    # Check if the primitive list table is populated
+    assert (
+        db.connection.table("multiple_values").count().execute() == 3
+    ), "Wrong count for primitive list table"
