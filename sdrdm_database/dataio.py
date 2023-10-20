@@ -32,13 +32,15 @@ def insert_into_database(
         field_info = dataset.__fields__[key]
         is_mutliple = get_origin(field_info.outer_type_) is list
         is_obj = hasattr(field_info.type_, "__fields__")
+        sub_key = f"{dataset.__class__.__name__}_{key}"
 
         if is_obj:
-            sub_objects[key] = [value] if not is_mutliple else value
+            sub_objects[sub_key] = [value] if not is_mutliple else value
             to_exclude.add(key)
         elif is_mutliple and not is_obj:
             kwargs = {
-                "table": key,
+                "table": sub_key,
+                "column": key,
                 "array": value,
                 "db": db,
                 "parent_col": f"{table_name}_id",
@@ -98,6 +100,7 @@ def _is_empty(obj):
 
 def _insert_primitive_array(
     table: str,
+    column: str,
     array: List[Any],
     db: "DBConnector",
     parent_col: str,
@@ -105,7 +108,7 @@ def _insert_primitive_array(
 ) -> None:
     for value in array:
         to_insert = {
-            table: value,
+            column: value,
             parent_col: parent_id,
         }
         db.connection.insert(table, to_insert)
