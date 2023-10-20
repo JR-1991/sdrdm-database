@@ -23,3 +23,6 @@ This is an example of a nested data structure.
 - another_value
   - Type: string
   - Description: Another test
+- value
+  - Type: float
+  - Description: Test
