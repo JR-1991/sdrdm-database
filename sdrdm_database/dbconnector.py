@@ -8,6 +8,7 @@ from enum import Enum
 
 from sdrdm_database import commands
 from sdrdm_database.dataio import insert_into_database
+from sdrdm_database.modelutils import rebuild_api
 
 
 class SupportedBackends(str, Enum):
@@ -172,3 +173,29 @@ class DBConnector(BaseModel):
                     )
             except Exception as e:
                 raise ValueError(f"Could not insert data into database: {e}") from e
+
+    # ! API Tools
+    def get_table_api(self, name: str):
+        """Returns an API for the specified table.
+
+        Args:
+            name (str): The name of the table.
+
+        Returns:
+            The API for the specified table.
+
+        Raises:
+            ValueError: If the requested model is not registered.
+        """
+        model_meta = (
+            self.connection.table("__model_meta__").to_pandas().set_index("root_object")
+        )
+
+        if name not in model_meta.index:
+            raise ValueError(f"Requested model '{name}' is not registered.")
+
+        lib_specs = model_meta.loc[name].specifications
+        return getattr(
+            rebuild_api(lib_specs, name),
+            name,
+        )
