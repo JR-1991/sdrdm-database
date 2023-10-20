@@ -22,10 +22,21 @@ def test_mysql():
 
     # Load model
     lib = DataModel.from_markdown("./.github/integration/model.md")
-    create_tables(db_connector=db, model=lib.Test)
+    create_tables(
+        db_connector=db,
+        model=lib.Test,
+        markdown_path="./.github/integration/model.md",
+    )
 
     # Check tables
-    expected_tables = set(["Test", "nested", "multiple_values"])
+    expected_tables = set(
+        [
+            "Test",
+            "Test_nested",
+            "Test_multiple_values",
+            "__model_meta__",
+        ]
+    )
     assert (
         set(db.connection.list_tables()) == expected_tables
     ), f"Expected tables '{expected_tables}' but got '{db.connection.list_tables()}'"
@@ -67,5 +78,5 @@ def test_mysql():
 
     # Check if the primitive list table is populated
     assert (
-        db.connection.table("multiple_values").count().execute() == 3
+        db.connection.table("Test_multiple_values").count().execute() == 3
     ), "Wrong count for primitive list table"
