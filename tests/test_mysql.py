@@ -3,7 +3,6 @@ import pytest
 
 from sdRDM import DataModel
 from sdRDM.base.listplus import ListPlus
-from sdrdm_database import create_tables
 
 
 def sort_subkeys(data):
@@ -44,8 +43,7 @@ def test_mysql():
 
     # Load model
     lib = DataModel.from_markdown("./.github/integration/model.md")
-    create_tables(
-        db_connector=db,
+    db.create_tables(
         model=lib.Test,
         markdown_path="./.github/integration/model.md",
     )
