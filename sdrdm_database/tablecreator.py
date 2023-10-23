@@ -300,7 +300,7 @@ def _create_table_schema(
         db_connector.__commands__.add_primary_key,
         table_name=table_name,
         primary_key=f"{table_name}_id",
-        con=db_connector.connection,
+        dbconnector=db_connector,
     )
 
     schemes.append(
@@ -344,7 +344,7 @@ def _handle_foreign_keys(
         "foreign_key": f"{parent}_id",
         "reference_table": parent,
         "reference_column": f"{parent}_id",
-        "con": db_connector.connection,
+        "dbconnector": db_connector,
     }
 
     fk_commands.append(
