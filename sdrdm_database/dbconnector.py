@@ -13,6 +13,7 @@ from sdrdm_database.dataio import (
     insert_into_database,
 )
 from sdrdm_database.modelutils import rebuild_api
+from sdrdm_database.tablecreator import create_tables
 
 
 class SupportedBackends(str, Enum):
@@ -159,6 +160,27 @@ class DBConnector(BaseModel):
                 f"Supported types are: {COMMAND_MAPPER.keys()}"
             )
 
+    # ! Table creation
+    def create_tables(
+        self,
+        model: "DataModel",
+        markdown_path: str,
+    ):
+        """Creates tables in the database from a DataModel.
+
+        Args:
+            model (DataModel): The DataModel to create tables from.
+            markdown_path (str): The path/GitURL to the markdown file that contains the DataModel.
+        """
+
+        create_tables(
+            db_connector=self,
+            model=model,
+            markdown_path=markdown_path,
+        )
+
+    # ! Getters and inserters
+
     def insert(self, *datasets: "DataModel", verbose: bool = False):
         """Inserts data into the database.
 
@@ -178,7 +200,6 @@ class DBConnector(BaseModel):
             except Exception as e:
                 raise ValueError(f"Could not insert data into database: {e}") from e
 
-    # ! Getters and inserters
     def get(
         self,
         table: str,
