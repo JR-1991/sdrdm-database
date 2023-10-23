@@ -1,10 +1,9 @@
 import strawberry
 import toml
-import typer
 
 from strawberry.schema.config import StrawberryConfig
 from sdrdm_database import DBConnector
-from typing import Any, get_origin, List
+from typing import Any, Optional, get_origin, List
 from pydantic import create_model
 
 from sdrdm_database.dbconnector import SupportedBackends
@@ -60,8 +59,14 @@ def convert_model(model):
     )
 
 
-def resolver_fun(db, model, dtype):
+def resolver_fun(db, model, dtype, id=None):
     result = db.get(model.__name__)
+
+    if id is not None:
+        result = db.get(model.__name__, f"{model.__name__}_id", id)
+    else:
+        result = db.get(model.__name__)
+
     return [dtype.from_pydantic(row) for row in result]
 
 
@@ -90,11 +95,15 @@ model = fetch_model(table, db)
 dtype = convert_model(model)
 
 
+def _resolve(id: Optional[str] = None):
+    return resolver_fun(db=db, model=model, dtype=dtype, id=id)
+
+
 @strawberry.type
 class Query:
-    roots: List[dtype] = strawberry.field(
-        resolver=lambda: resolver_fun(db=db, model=model, dtype=dtype)
-    )
+    @strawberry.field
+    def roots(self, id: Optional[str] = None) -> List[dtype]:
+        return _resolve(id=id)
 
 
 schema = strawberry.Schema(
