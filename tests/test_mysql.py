@@ -1,7 +1,24 @@
 import pytest
 
 from sdRDM import DataModel
+from sdRDM.base.listplus import ListPlus
 from sdrdm_database import create_tables
+
+
+def sort_subkeys(data):
+    """
+    Sorts sub keys that are lists in a dictionary recursively.
+    """
+    if isinstance(data, dict):
+        for key, value in data.items():
+            is_complex = all(isinstance(v, dict) for v in value)
+            if isinstance(value, list) and is_complex:
+                data[key] = sorted(value, key=lambda x: x["name"])
+            elif isinstance(value, list) and not is_complex:
+                data[key] = sorted(value)
+            elif isinstance(value, dict):
+                data[key] = sort_subkeys(value)
+    return data
 
 
 @pytest.mark.integration
@@ -80,3 +97,18 @@ def test_mysql():
     assert (
         db.connection.table("Test_multiple_values").count().execute() == 3
     ), "Wrong count for primitive list table"
+
+    # Retrieve the object again
+    retrieved = db.get("Test", "name", "Hello")
+    to_exclude = {
+        "id": True,
+        "nested": {
+            0: {"id": True},
+            1: {"id": True},
+        },
+    }
+
+    expected = sort_subkeys(obj.dict(exclude=to_exclude))
+    retrieved = sort_subkeys(retrieved.dict(exclude=to_exclude))
+
+    assert expected == retrieved, f"Expected object '{obj}' but got '{retrieved}'"
