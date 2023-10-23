@@ -1,7 +1,7 @@
-import json
 import os
 import tempfile
 from typing import Dict
+from io import StringIO
 
 from sdRDM import DataModel
 from sdRDM.generator.codegen import generate_api_from_parser
@@ -10,7 +10,7 @@ from sdRDM.tools.gitutils import _import_library
 
 
 def convert_md_to_json(
-    path: str,
+    md_content: str,
 ):
     """Converts a markdown file to a JSON object.
 
@@ -20,7 +20,7 @@ def convert_md_to_json(
     Returns:
         dict: A JSON string representing the markdown file.
     """
-    return MarkdownParser.parse(open(path)).json(indent=2)
+    return MarkdownParser.parse(StringIO(md_content)).json(indent=2)
 
 
 def rebuild_api(
