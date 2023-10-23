@@ -188,14 +188,20 @@ class DBConnector(BaseModel):
             ValueError: If the requested model is not registered.
         """
         model_meta = (
-            self.connection.table("__model_meta__").to_pandas().set_index("root_object")
+            self.connection.table("__model_meta__").to_pandas().set_index("table")
         )
 
         if name not in model_meta.index:
             raise ValueError(f"Requested model '{name}' is not registered.")
 
         lib_specs = model_meta.loc[name].specifications
+        obj_name = model_meta.loc[name].obj_name
+
+        if lib_specs is None:
+            part_of = model_meta.loc[name].part_of
+            lib_specs = model_meta.loc[part_of].specifications
+
         return getattr(
-            rebuild_api(lib_specs, name),
-            name,
+            rebuild_api(lib_specs, obj_name),
+            obj_name,
         )
