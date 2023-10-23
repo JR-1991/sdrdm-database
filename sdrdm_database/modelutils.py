@@ -9,7 +9,7 @@ from sdRDM.markdown.markdownparser import MarkdownParser
 from sdRDM.tools.gitutils import _import_library
 
 
-def comvert_md_to_json(
+def convert_md_to_json(
     path: str,
 ):
     """Converts a markdown file to a JSON object.
@@ -52,5 +52,3 @@ def rebuild_api(
             _import_library(api_loc, libname),
             links={},
         )
-
-    raise Exception("Could not rebuild API from given JSON specs!")
