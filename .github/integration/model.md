@@ -21,6 +21,7 @@ Description
 - nested
   - Type: Nested
   - Description: Nested object
+  - Multiple: True
 - multiple_values
   - Type: integer
   - Description: Multiple values
