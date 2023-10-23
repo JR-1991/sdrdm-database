@@ -67,7 +67,10 @@ class PostgresCommands(MetaCommands):
     ):
         try:
             con.raw_sql(
-                f"ALTER TABLE {table_name} ADD COLUMN {primary_key} UUID PRIMARY KEY;"
+                f'ALTER TABLE "{table_name}" ADD COLUMN "{primary_key}" VARCHAR(36);'
+            )
+            con.raw_sql(
+                f'ALTER TABLE "{table_name}" ADD PRIMARY KEY ("{primary_key}");'
             )
         except Exception as e:
             print(f"Could not add primary key {primary_key} for table {table_name}: ")
@@ -82,9 +85,9 @@ class PostgresCommands(MetaCommands):
         con: "BaseAlchemyBackend",
     ):
         try:
-            con.raw_sql(f"ALTER TABLE {table_name} ADD COLUMN {foreign_key} UUID;")
+            con.raw_sql(f'ALTER TABLE "{table_name}" ADD COLUMN {foreign_key} UUID;')
             con.raw_sql(
-                f"ALTER TABLE {table_name} ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});"
+                f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});'
             )
         except Exception as e:
             print(
