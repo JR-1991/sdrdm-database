@@ -12,6 +12,7 @@ pydantic = "1.10"
 ibis-framework = {extras = ["mysql"], version = "^7.0.0"}
 gitpython = "^3.1.40"
 validators = "^0.22.0"
+strawberry-graphql = "^0.209.8"
 
 [tool.poetry.extras]
 mysql = ["pymysql"]
