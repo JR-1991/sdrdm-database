@@ -7,7 +7,7 @@ from functools import partial
 from typing import get_origin
 from pydantic import create_model
 
-from sdrdm_database.modelutils import comvert_md_to_json
+from sdrdm_database.modelutils import convert_md_to_json
 
 from .dbconnector import DBConnector
 
@@ -34,13 +34,15 @@ def create_tables(
     """
 
     _validate_input(db_connector=db_connector, model=model)
-    _add_model_table(
-        db_connector=db_connector,
-        model=model,
-        markdown_path=markdown_path,
-    )
 
-    print(f"🚀 Creating tables for data model {model.__name__}")
+    print(f"\n🚀 Creating tables for data model {model.__name__}\n│")
+
+    _add_to_model_table(
+        table_name=model.__name__,
+        db_connector=db_connector,
+        markdown_path=markdown_path,
+        obj_name=model.__name__,
+    )
 
     # Create schemes for each object found within the data model
     create_instructions = _create_table_schema(
@@ -61,6 +63,16 @@ def create_tables(
         if table_name in tables:
             print(f"├── Table '{table_name}'. Already exists in database. Skipping.")
             continue
+
+        # Register the sub model
+        if not instruction["is_primitive"]:
+            _add_to_model_table(
+                db_connector=db_connector,
+                markdown_path=markdown_path,
+                table_name=table_name,
+                part_of=model.__name__,
+                obj_name=instruction["obj_name"],
+            )
 
         # Create the table
         db_connector.connection.create_table(
@@ -94,7 +106,7 @@ def create_tables(
         )
         command()
 
-    print(f"╰── 🎉 Created all tables for data model {model.__name__}\n")
+    print(f"│\n╰── 🎉 Created all tables for data model {model.__name__}\n")
 
 
 def _validate_input(
@@ -106,53 +118,87 @@ def _validate_input(
         model, DataModel  # type: ignore
     ), f"Object {model} is not a subclass of DataModel and thus no valid sdRDM object. "
 
+    try:
+        db_connector.connection.list_tables()
+    except Exception as e:
+        raise Exception(f"Could not connect to database. Error: {e}")
 
-def _add_model_table(
+
+def _add_to_model_table(
     db_connector: DBConnector,
-    model: "DataModel",
+    table_name: str,
+    obj_name: str,
     markdown_path: str,
     github_url: Optional[str] = None,
     commit_hash: Optional[str] = None,
+    part_of: Optional[str] = None,
 ):
-    table_name = "__model_meta__"
-    api_schema = comvert_md_to_json(markdown_path)
-    schema = ibis.schema(
-        {
-            "root_object": "!string",
-            "specifications": "!json",
-            "github_url": "string",
-            "commit_hash": "string",
-        }
-    )
+    """Adds a table model to the __model_meta__ table in the database.
 
-    print(f"💎 Registering data model {model.__name__}")
+    Args:
+        db_connector (DBConnector): The database connector object.
+        table_name (str): The name of the table.
+        obj_name (str): The name of the object.
+        markdown_path (str): The path to the markdown file.
+        github_url (Optional[str], optional): The URL of the GitHub repository. Defaults to None.
+        commit_hash (Optional[str], optional): The commit hash of the repository. Defaults to None.
+        part_of (Optional[str], optional): The name of the parent object. Defaults to None.
+    """
 
-    if table_name not in db_connector.connection.list_tables():
-        print("├── Table __model_meta__ not existing. Adding to DB!")
-        db_connector.connection.create_table(
-            name=table_name,
-            schema=schema,
-        )
+    _create_model_meta_table(db_connector=db_connector)
+    model_meta_table = db_connector.connection.table("__model_meta__").to_pandas()
 
-    model_meta_table = db_connector.connection.table(table_name).to_pandas()
+    if not part_of:
+        api_schema = convert_md_to_json(markdown_path)
+    else:
+        api_schema = None
 
-    if model.__name__ in model_meta_table["root_object"].values:
-        print(f"╰── Model '{model.__name__}' already registered. Skipping.\n")
+    if table_name in model_meta_table["table"].values:
+        print(f"├── Model '{table_name}' already registered. Skipping.")
         return
 
     db_connector.connection.insert(
-        table_name,
+        "__model_meta__",
         [
             {
-                "root_object": model.__name__,
+                "table": table_name,
                 "specifications": api_schema,
                 "github_url": github_url,
                 "commit_hash": commit_hash,
+                "part_of": part_of,
+                "obj_name": obj_name,
             }
         ],
     )
 
-    print(f"╰── Added model {model.__name__} to __model_meta__ table\n")
+    print(f"├── Added table model '{table_name}' to __model_meta__ table")
+
+
+def _create_model_meta_table(
+    db_connector: DBConnector,
+):
+    """Creates a table named __model_meta__ in the database if it doesn't exist.
+
+    Args:
+        db_connector (DBConnector): A database connector object.
+    """
+    schema = ibis.schema(
+        {
+            "table": "!string",
+            "specifications": "json",
+            "github_url": "string",
+            "commit_hash": "string",
+            "part_of": "string",
+            "obj_name": "string",
+        }
+    )
+
+    if "__model_meta__" not in db_connector.connection.list_tables():
+        print("├── Table __model_meta__ not existing. Adding to DB!")
+        db_connector.connection.create_table(
+            name="__model_meta__",
+            schema=schema,
+        )
 
 
 def _create_table_schema(
@@ -225,6 +271,7 @@ def _create_table_schema(
     schemes.append(
         {
             "name": table_name,
+            "obj_name": data_model.__name__,
             "schema": schema,
             "pk_command": pk_fun,
             "fk_commands": fk_commands,
