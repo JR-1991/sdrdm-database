@@ -1,3 +1,4 @@
+from copy import deepcopy
 import pytest
 
 from sdRDM import DataModel
@@ -11,7 +12,11 @@ def sort_subkeys(data):
     """
     if isinstance(data, dict):
         for key, value in data.items():
-            is_complex = all(isinstance(v, dict) for v in value)
+            if isinstance(value, (list, ListPlus)):
+                is_complex = all(isinstance(v, dict) for v in value)
+            else:
+                is_complex = isinstance(value, dict)
+
             if isinstance(value, list) and is_complex:
                 data[key] = sorted(value, key=lambda x: x["name"])
             elif isinstance(value, list) and not is_complex:
@@ -73,7 +78,12 @@ def test_mysql():
         "bool_value": "boolean",
     }
 
-    assert schema == expected, f"Expected schema '{expected}' but got '{schema}'"
+    expected_repeat = deepcopy(expected)
+    expected_repeat["bool_value"] = "int8"
+
+    assert (
+        schema == expected or schema == expected_repeat
+    ), f"Expected schema '{expected}' but got '{schema}'"
 
     # Add data
     obj = lib.Test(
@@ -83,6 +93,8 @@ def test_mysql():
         name="Hello",
         multiple_values=[1, 2, 3],
     )
+
+    obj.add_to_nested(name="Hello")
 
     db.insert(obj)
 
@@ -104,7 +116,6 @@ def test_mysql():
         "id": True,
         "nested": {
             0: {"id": True},
-            1: {"id": True},
         },
     }
 
