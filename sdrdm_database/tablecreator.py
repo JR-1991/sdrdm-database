@@ -15,7 +15,6 @@ from pydantic import StrictBool, create_model
 
 from sdrdm_database.modelutils import convert_md_to_json
 
-from .dbconnector import DBConnector
 
 TYPE_MAPPING = {
     str: "string",
@@ -160,7 +159,7 @@ def _validate_input(
 
 
 def _add_to_model_table(
-    db_connector: DBConnector,
+    db_connector: "DBConnector",
     table_name: str,
     obj_name: str,
     md_content: str,
@@ -210,7 +209,7 @@ def _add_to_model_table(
 
 
 def _create_model_meta_table(
-    db_connector: DBConnector,
+    db_connector: "DBConnector",
 ):
     """Creates a table named __model_meta__ in the database if it doesn't exist.
 
@@ -237,7 +236,7 @@ def _create_model_meta_table(
 
 
 def _create_table_schema(
-    db_connector: DBConnector,
+    db_connector: "DBConnector",
     data_model: "DataModel",
     table_name: str,
     schemes: List[Dict],
@@ -320,7 +319,7 @@ def _create_table_schema(
 def _handle_foreign_keys(
     parent: str,
     table_name: str,
-    db_connector: DBConnector,
+    db_connector: "DBConnector",
     fk_commands: List,
 ):
     """Add a foreign key to the table schema and create a command to add the foreign key to the database.
