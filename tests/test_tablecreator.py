@@ -121,6 +121,7 @@ def test_create_table_schema():
         "schema": {"foo": "!string", "bar": "int64"},
         "fk_commands": [],
         "is_primitive": False,
+        "obj_name": "MockDataModel",
     }
 
     assert result == [expected_schema]
