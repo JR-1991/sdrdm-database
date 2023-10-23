@@ -103,10 +103,10 @@ class PostgresCommands(MetaCommands):
             ) as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        f'ALTER TABLE "{table_name}" ADD COLUMN {foreign_key} VARCHAR(36);'
+                        f'ALTER TABLE "{table_name}" ADD COLUMN "{foreign_key}" VARCHAR(36);'
                     )
                     cur.execute(
-                        f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});'
+                        f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ("{foreign_key}") REFERENCES "{reference_table}"("{reference_column}");'
                     )
         except Exception as e:
             print(
