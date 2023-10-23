@@ -111,7 +111,7 @@ def test_mysql():
     ), "Wrong count for primitive list table"
 
     # Retrieve the object again
-    retrieved = db.get("Test", "name", "Hello")
+    retrieved = db.get("Test", "name", "Hello")[0]
     to_exclude = {
         "id": True,
         "nested": {
