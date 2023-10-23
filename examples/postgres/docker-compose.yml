@@ -8,8 +8,8 @@ services:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: root
       POSTGRES_DB: ExampleDB
-    volumes:
-      - ${PWD}/data:/var/lib/postgresql/data
+    # volumes:
+    #   - ${PWD}/data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
   pgadmin:
