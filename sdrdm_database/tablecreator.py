@@ -1,11 +1,17 @@
+from enum import Enum
+import os
+import git
 import ibis
+import tempfile
+import validators
+import glob
 
 from sdRDM import DataModel
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, get_args
 from datetime import datetime, date
 from functools import partial
 from typing import get_origin
-from pydantic import create_model
+from pydantic import StrictBool, create_model
 
 from sdrdm_database.modelutils import convert_md_to_json
 
@@ -18,6 +24,7 @@ TYPE_MAPPING = {
     int: "int64",
     date: "string",
     datetime: "string",
+    StrictBool: "boolean",
 }
 
 
@@ -37,10 +44,17 @@ def create_tables(
 
     print(f"\n🚀 Creating tables for data model {model.__name__}\n│")
 
+    if validators.url(markdown_path):
+        print("├── Fetching markdown model from GitHub")
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            md_content = _fetch_specs(markdown_path, tmpdirname)
+    else:
+        md_content = open(markdown_path).read()
+
     _add_to_model_table(
         table_name=model.__name__,
         db_connector=db_connector,
-        markdown_path=markdown_path,
+        md_content=md_content,
         obj_name=model.__name__,
     )
 
@@ -53,7 +67,7 @@ def create_tables(
     )
 
     # Create tables and add foreign keys
-    fk_commands = []
+    fk_commands, pk_commands = [], []
     tables = db_connector.connection.list_tables()
 
     for instruction in create_instructions[::-1]:
@@ -68,7 +82,7 @@ def create_tables(
         if not instruction["is_primitive"]:
             _add_to_model_table(
                 db_connector=db_connector,
-                markdown_path=markdown_path,
+                md_content=md_content,
                 table_name=table_name,
                 part_of=model.__name__,
                 obj_name=instruction["obj_name"],
@@ -81,13 +95,20 @@ def create_tables(
         )
 
         if instruction["is_primitive"] is False:
-            instruction["pk_command"]()
+            pk_commands.append(instruction["pk_command"])
 
         tables.append(table_name)
 
         print(f"├── Created table '{table_name}'")
 
         fk_commands += instruction["fk_commands"]
+
+    for command in pk_commands:
+        primary_key = command.keywords["primary_key"]
+        table_name = command.keywords["table_name"]
+        command()
+
+        print(f"├── Added primary key '{primary_key}' to table {table_name}")
 
     for command in fk_commands:
         foreign_key = command.keywords["foreign_key"]
@@ -109,6 +130,20 @@ def create_tables(
     print(f"│\n╰── 🎉 Created all tables for data model {model.__name__}\n")
 
 
+def _fetch_specs(url: str, tmpdirname: str):
+    git.Repo.clone_from(url, tmpdirname)
+
+    schema_loc = os.path.join(tmpdirname, "specifications")
+    md_files = glob.glob(f"{schema_loc}/*.md")
+
+    if len(md_files) == 0:
+        raise ValueError(f"No markdown files found in {schema_loc}")
+    elif len(md_files) > 1:
+        raise ValueError(f"More than one markdown file found in {schema_loc}")
+
+    return md_files[0]
+
+
 def _validate_input(
     db_connector: "DBConnector",
     model: DataModel,
@@ -128,7 +163,7 @@ def _add_to_model_table(
     db_connector: DBConnector,
     table_name: str,
     obj_name: str,
-    markdown_path: str,
+    md_content: str,
     github_url: Optional[str] = None,
     commit_hash: Optional[str] = None,
     part_of: Optional[str] = None,
@@ -149,7 +184,7 @@ def _add_to_model_table(
     model_meta_table = db_connector.connection.table("__model_meta__").to_pandas()
 
     if not part_of:
-        api_schema = convert_md_to_json(markdown_path)
+        api_schema = convert_md_to_json(md_content)
     else:
         api_schema = None
 
@@ -358,6 +393,12 @@ def _map_type(
     Returns:
         The corresponding type string for the given data type.
     """
+
+    if get_args(dtype):
+        dtype = _deconstruct_union_type(dtype)
+    if issubclass(dtype, Enum):
+        dtype = _get_enum_type(dtype)
+
     mapped_type = TYPE_MAPPING.get(dtype, "NOT_SUPPORTED")
 
     if mapped_type == "NOT_SUPPORTED":
@@ -367,3 +408,33 @@ def _map_type(
         return "!" + mapped_type
 
     return mapped_type
+
+
+def _deconstruct_union_type(dtype):
+    """Deconstructs a union type into its primitive types.
+
+    Args:
+        dtype: The data type to deconstruct.
+
+    Returns:
+        A list of primitive types.
+    """
+    types = [
+        dt
+        for dt in get_args(dtype)
+        if not hasattr(dt, "__fields__") and not dt == type(None)
+    ]
+
+    if len(types) > 1:
+        raise ValueError(f"Multiple types '{dtype}' are not supported yet.")
+
+    return types[0]
+
+
+def _get_enum_type(enum):
+    dtypes = list({type(member.value) for member in enum.__members__.values()})
+
+    if len(dtypes) > 1:
+        raise ValueError(f"Multiple types '{dtypes}' are not supported yet.")
+
+    return dtypes[0]
