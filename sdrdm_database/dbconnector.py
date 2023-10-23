@@ -182,8 +182,8 @@ class DBConnector(BaseModel):
     def get(
         self,
         table: str,
-        attribute: str,
-        value: Any,
+        attribute: Optional[str] = None,
+        value: Optional[Any] = None,
         query_fun: Callable = _query_equal,
     ) -> "DataModel":
         """
@@ -207,23 +207,32 @@ class DBConnector(BaseModel):
             raise ValueError(f"Requested model '{table}' is not registered.")
 
         model = self.get_table_api(table)
+        datasets = []
 
-        dataset = {}
-        _extract_related_rows(
-            model=model,
-            table_name=model.__name__,
-            id_col=f"{model.__name__}_id",
-            attr=attribute,
-            target=value,
-            query_fun=query_fun,
-            db_connector=self,
-            dataset=dataset,
-        )
+        table_ = self.connection.table(table)
 
-        if dataset:
-            return model(**dataset)
+        if query_fun and attribute and value:
+            rows = table_[query_fun(table_, attribute, value)].execute()
         else:
-            return []
+            rows = table_.execute()
+
+        for _, row in rows.iterrows():
+            dataset = {}
+            row_id = row[f"{table}_id"]
+            _extract_related_rows(
+                model=model,
+                table_name=model.__name__,
+                id_col=f"{model.__name__}_id",
+                attr=f"{table}_id",
+                target=row_id,
+                query_fun=_query_equal,
+                db_connector=self,
+                dataset=dataset,
+            )
+
+            datasets.append(model(**dataset))
+
+        return datasets
 
     # ! API Tools
     def get_table_api(self, name: str):
