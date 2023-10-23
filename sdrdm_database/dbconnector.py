@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Callable, Dict, Optional
 
 import ibis
 
@@ -7,7 +7,11 @@ from pydantic import BaseModel, PrivateAttr
 from enum import Enum
 
 from sdrdm_database import commands
-from sdrdm_database.dataio import insert_into_database
+from sdrdm_database.dataio import (
+    _extract_related_rows,
+    _query_equal,
+    insert_into_database,
+)
 from sdrdm_database.modelutils import rebuild_api
 
 
@@ -173,6 +177,53 @@ class DBConnector(BaseModel):
                     )
             except Exception as e:
                 raise ValueError(f"Could not insert data into database: {e}") from e
+
+    # ! Getters and inserters
+    def get(
+        self,
+        table: str,
+        attribute: str,
+        value: Any,
+        query_fun: Callable = _query_equal,
+    ) -> "DataModel":
+        """
+        Retrieves rows from the specified table that match the given attribute and value.
+
+        Args:
+            table: The name of the table to retrieve rows from.
+            attribute: The name of the attribute to match against.
+            value: The value to match against the attribute.
+
+        Returns:
+            DataModel: A DataModel object that contains the retrieved rows.
+        Raises:
+            ValueError: If the requested model is not registered.
+        """
+        model_meta = (
+            self.connection.table("__model_meta__").to_pandas().set_index("table")
+        )
+
+        if table not in model_meta.index:
+            raise ValueError(f"Requested model '{table}' is not registered.")
+
+        model = self.get_table_api(table)
+
+        dataset = {}
+        _extract_related_rows(
+            model=model,
+            table_name=model.__name__,
+            id_col=f"{model.__name__}_id",
+            attr=attribute,
+            target=value,
+            query_fun=query_fun,
+            db_connector=self,
+            dataset=dataset,
+        )
+
+        if dataset:
+            return model(**dataset)
+        else:
+            return []
 
     # ! API Tools
     def get_table_api(self, name: str):
