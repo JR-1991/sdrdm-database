@@ -1,3 +1,4 @@
+import psycopg2
 from abc import ABC, abstractmethod
 
 
@@ -16,7 +17,7 @@ class MetaCommands(ABC):
         foreign_key: str,
         reference_table: str,
         reference_column: str,
-        con: "BaseAlchemyBackend",
+        dbconnector: "DBConnector",
     ):
         pass
 
@@ -26,10 +27,10 @@ class MySQLCommands(MetaCommands):
     def add_primary_key(
         table_name: str,
         primary_key: str,
-        con: "BaseAlchemyBackend",
+        dbconnector: "BaseAlchemyBackend",
     ):
         try:
-            con.raw_sql(
+            dbconnector.connection.raw_sql(
                 f"ALTER TABLE {table_name} ADD COLUMN {primary_key} VARCHAR(36) PRIMARY KEY;"
             )
         except Exception as e:
@@ -42,13 +43,13 @@ class MySQLCommands(MetaCommands):
         foreign_key: str,
         reference_table: str,
         reference_column: str,
-        con: "BaseAlchemyBackend",
+        dbconnector: "DBConnector",
     ):
         try:
-            con.raw_sql(
+            dbconnector.connection.raw_sql(
                 f"ALTER TABLE {table_name} ADD COLUMN {foreign_key} VARCHAR(36);"
             )
-            con.raw_sql(
+            dbconnector.connection.raw_sql(
                 f"ALTER TABLE {table_name} ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});"
             )
         except Exception as e:
@@ -63,15 +64,23 @@ class PostgresCommands(MetaCommands):
     def add_primary_key(
         table_name: str,
         primary_key: str,
-        con: "BaseAlchemyBackend",
+        dbconnector: "DBConnector",
     ):
         try:
-            con.raw_sql(
-                f'ALTER TABLE "{table_name}" ADD COLUMN "{primary_key}" VARCHAR(36);'
-            )
-            con.raw_sql(
-                f'ALTER TABLE "{table_name}" ADD PRIMARY KEY ("{primary_key}");'
-            )
+            with psycopg2.connect(
+                dbname=dbconnector.db_name,
+                user=dbconnector.username,
+                password=dbconnector.password,
+                host=dbconnector.host,
+                port=dbconnector.port,
+            ) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN "{primary_key}" VARCHAR(36);'
+                    )
+                    cur.execute(
+                        f'ALTER TABLE "{table_name}" ADD PRIMARY KEY ("{primary_key}");'
+                    )
         except Exception as e:
             print(f"Could not add primary key {primary_key} for table {table_name}: ")
             raise e
@@ -82,13 +91,23 @@ class PostgresCommands(MetaCommands):
         foreign_key: str,
         reference_table: str,
         reference_column: str,
-        con: "BaseAlchemyBackend",
+        dbconnector: "BaseAlchemyBackend",
     ):
         try:
-            con.raw_sql(f'ALTER TABLE "{table_name}" ADD COLUMN {foreign_key} UUID;')
-            con.raw_sql(
-                f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});'
-            )
+            with psycopg2.connect(
+                dbname=dbconnector.db_name,
+                user=dbconnector.username,
+                password=dbconnector.password,
+                host=dbconnector.host,
+                port=dbconnector.port,
+            ) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN {foreign_key} VARCHAR(36);'
+                    )
+                    cur.execute(
+                        f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});'
+                    )
         except Exception as e:
             print(
                 f"Could not add foreign key {foreign_key} for table {table_name} to {reference_table}({reference_column}): "
