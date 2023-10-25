@@ -1,15 +1,13 @@
+import toml
+
 from sdRDM import DataModel
 from sdrdm_database import DBConnector
 
 # Establish a connection to the database
-db = DBConnector(
-    username="root",
-    password="root",
-    host="localhost",
-    db_name="db",
-    port=3306,
-    dbtype="mysql",
-)
+config = toml.load(open("./env.toml"))
+del config["table"]
+
+db = DBConnector(**config)
 
 # Fetch the sdRDM schema
 lib = DataModel.from_markdown("./model.md")
