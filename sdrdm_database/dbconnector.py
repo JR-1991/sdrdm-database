@@ -1,7 +1,8 @@
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import ibis
 
+from ibis.expr.types.relations import Table
 from ibis.backends.base.sql.alchemy import BaseAlchemyBackend
 from pydantic import BaseModel, PrivateAttr
 from enum import Enum
@@ -9,7 +10,6 @@ from enum import Enum
 from sdrdm_database import commands
 from sdrdm_database.dataio import (
     _extract_related_rows,
-    _query_equal,
     insert_into_database,
 )
 from sdrdm_database.modelutils import rebuild_api
@@ -173,14 +173,18 @@ class DBConnector(BaseModel):
             markdown_path (str): The path/GitURL to the markdown file that contains the DataModel.
         """
 
-        create_tables(
-            db_connector=self,
-            model=model,
-            markdown_path=markdown_path,
-        )
+        try:
+            create_tables(
+                db_connector=self,
+                model=model,
+                markdown_path=markdown_path,
+            )
+        except ConnectionRefusedError as e:
+            print(
+                "❌ Couldnt connect to database. Please check your credentials or status of the database."
+            )
 
     # ! Getters and inserters
-
     def insert(self, *datasets: "DataModel", verbose: bool = False):
         """Inserts data into the database.
 
@@ -202,58 +206,43 @@ class DBConnector(BaseModel):
 
     def get(
         self,
-        table: str,
-        attribute: Optional[str] = None,
-        value: Optional[Any] = None,
-        query_fun: Callable = _query_equal,
-    ) -> "DataModel":
+        table_name: str,
+        filtered_table: Optional[Table] = None,
+        max_rows: int = 10,
+        model: Optional["DataModel"] = None,
+    ) -> List["DataModel"]:
         """
         Retrieves rows from the specified table that match the given attribute and value.
 
         Args:
-            table: The name of the table to retrieve rows from.
-            attribute: The name of the attribute to match against.
-            value: The value to match against the attribute.
+            table_name (str): The name of the table to retrieve rows from.
+            filtered_table (Optional[Table], optional): A filtered table. Defaults to None.
+            max_rows (int, optional): The maximum number of rows to retrieve. Defaults to 10.
 
         Returns:
-            DataModel: A DataModel object that contains the retrieved rows.
+            List[DataModel]: A list of DataModel objects that contain the retrieved rows.
+
         Raises:
             ValueError: If the requested model is not registered.
         """
-        model_meta = (
-            self.connection.table("__model_meta__").to_pandas().set_index("table")
+
+        if filtered_table is not None:
+            table = filtered_table
+        else:
+            table = self.connection.table(table_name)
+
+        if model is None:
+            model = self.get_table_api(table_name)
+
+        datasets = _extract_related_rows(
+            table=table,
+            id_col=f"{table_name}_id",
+            db=self,
+            model=model,
+            MAX_ROWS=max_rows,
         )
 
-        if table not in model_meta.index:
-            raise ValueError(f"Requested model '{table}' is not registered.")
-
-        model = self.get_table_api(table)
-        datasets = []
-
-        table_ = self.connection.table(table)
-
-        if query_fun and attribute and value:
-            rows = table_[query_fun(table_, attribute, value)].execute()
-        else:
-            rows = table_.execute()
-
-        for _, row in rows.iterrows():
-            dataset = {}
-            row_id = row[f"{table}_id"]
-            _extract_related_rows(
-                model=model,
-                table_name=model.__name__,
-                id_col=f"{model.__name__}_id",
-                attr=f"{table}_id",
-                target=row_id,
-                query_fun=_query_equal,
-                db_connector=self,
-                dataset=dataset,
-            )
-
-            datasets.append(model(**dataset))
-
-        return datasets
+        return [model(**d) for d in datasets]
 
     # ! API Tools
     def get_table_api(self, name: str):

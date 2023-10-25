@@ -1,6 +1,7 @@
 from functools import partial
-from typing import Any, List, get_origin
+from typing import Any, Callable, Dict, List, Optional, Tuple, get_origin
 from typing import get_origin
+from joblib import Parallel, delayed
 import pandas as pd
 
 
@@ -88,6 +89,9 @@ def _is_empty(obj):
         A boolean indicating whether the object is empty or not.
     """
 
+    if obj is None:
+        return True
+
     return (
         obj.dict(
             exclude_unset=True,
@@ -96,9 +100,6 @@ def _is_empty(obj):
         ).values()
         == {}
     )
-
-
-from typing import Any, List
 
 
 def _insert_primitive_array(
@@ -128,138 +129,140 @@ def _insert_primitive_array(
         db.connection.insert(table, to_insert)
 
 
-def _query_equal(
-    table,
-    column,
-    value,
-):
-    """
-    Returns a boolean expression that can be used to filter a table based on a specific column and value.
-
-    Args:
-        table (pandas.DataFrame): The table to filter.
-        column (str): The name of the column to filter on.
-        value (Any): The value to filter for.
-
-    Returns:
-        pandas.Series: A boolean expression that can be used to filter the table.
-    """
-    return table[column] == value
-
-
 def _extract_related_rows(
-    model,
-    table_name,
-    id_col,
-    attr,
-    target,
-    query_fun,
-    db_connector,
-    dataset,
-    foreign_key=None,
-):
+    table,
+    id_col: str,
+    db: "DBConnector",
+    model: "DataModel",
+    query_fun: Optional[Callable] = None,
+    n_jobs: int = -1,
+    MAX_ROWS: int = 20,
+) -> List[Tuple[int, Dict[str, Any]]]:
     """Extracts related rows from a database table.
 
     Args:
-        model: The model class.
-        table_name: The name of the table to extract rows from.
-        id_col: The name of the ID column.
-        attr: The attribute to query on.
-        target: The target value to query for.
-        query_fun: The query function to use.
-        db_connector: The database connector.
-        dataset: The dataset to update.
-        foreign_key: The foreign key to exclude.
+        table: The database table to extract rows from.
+        id_col: The name of the column containing the row IDs.
+        db: The database connection object.
+        model: The Pydantic model representing the table schema.
+        query_fun: Optional function to filter rows before extraction.
+        n_jobs: Number of parallel jobs to use for extraction.
+        MAX_ROWS: Maximum number of rows to extract.
 
     Returns:
-        None.
+        A list of tuples, where each tuple contains the row ID and a dictionary
+        of the row's attribute values.
     """
-    table = db_connector.connection.table(table_name)
 
+    # Extract data
     if query_fun:
-        rows = table[query_fun(table, attr, target)].execute()
+        rows = table[query_fun(table)].execute()
     else:
-        rows = table.execute()
+        rows = table.execute().iloc[0:MAX_ROWS]
 
-    for _, row in rows.iterrows():
-        row = row.where(pd.notnull(row), None)
-        to_add = {
-            key.replace(f"{table_name}_id", "id"): value
-            for key, value in row.items()
-            if key != foreign_key
-        }
+    subset = list(model.__fields__.keys())
+    subset.remove("id")
 
-        if isinstance(dataset, list):
-            dataset.append(to_add)
-        else:
-            dataset.update(to_add)
-
-        # Retrieve the ID of the root table
-        row_id = row[id_col]
-
-        _process_row(
-            model=model,
-            id_col=id_col,
-            attr=attr,
-            row_id=row_id,
-            db_connector=db_connector,
-            dataset=dataset,
+    # Find out, which attributes are objects
+    obj_subset = [
+        (
+            attr.type_,
+            attr.name,
+            get_origin(attr.outer_type_) == list,
         )
+        for attr in model.__fields__.values()
+        if hasattr(attr.type_, "__fields__") or get_origin(attr.outer_type_) == list
+    ]
+
+    if db.dbtype.value == "mysql":
+        data = []
+        for _, row in rows.iterrows():
+            data.append(
+                _process_row(
+                    row=row,
+                    subset=subset,
+                    obj_subset=obj_subset,
+                    id_col=id_col,
+                    model=model,
+                    db=db,
+                )
+            )
+
+        return data
+
+    return Parallel(n_jobs=n_jobs, backend="threading")(
+        delayed(_process_row)(
+            row=row,
+            subset=subset,
+            obj_subset=obj_subset,
+            id_col=id_col,
+            model=model,
+            db=db,
+        )
+        for _, row in rows.iterrows()
+    )
 
 
 def _process_row(
-    model,
+    row,
+    subset,
+    obj_subset,
     id_col,
-    attr,
-    row_id,
-    db_connector,
-    dataset,
+    model,
+    db,
 ):
     """
-    Extracts related rows from a sub-table and adds them to the dataset.
+    Processes a single row of data from a database table.
 
     Args:
-        model: The model class for the parent table.
-        id_col: The name of the ID column for the parent table.
-        attr: The attribute being processed.
-        row_id: The ID of the row being processed.
-        db_connector: The database connector object.
-        dataset: The dataset to add the related rows to.
+        row (pandas.Series): A single row of data from a database table.
+        subset (List[str]): A list of column names to include in the processed data.
+        obj_subset (List[Tuple[type, str, bool]]): A list of tuples representing related objects to include in the processed data. Each tuple contains:
+            - A reference to the related object's model class
+            - The name of the related object's attribute in the processed data
+            - A boolean indicating whether the related object is a single object or a list of objects
+        id_col (str): The name of the column containing the primary key ID for the table.
+        model (type): The model class for the table being processed.
+        db (Database): The database object containing the table being processed.
 
     Returns:
-        None
+        dict: A dictionary containing the processed data for the input row, including related objects as specified in obj_subset.
     """
-    for attr in model.__fields__.values():
-        sub_table_name = f"{model.__name__}_{attr.name}"
-        is_obj = hasattr(attr.type_, "__fields__")
-        is_multiple = get_origin(attr.outer_type_) is list
 
-        if not is_obj and not is_multiple:
+    subset = [col for col in subset if col in row]
+    row = row.where(pd.notnull(row), None)
+    dataset = row[subset].to_dict()
+    dataset["id"] = row[id_col]
+
+    for (
+        sub_model,
+        name,
+        is_multi,
+    ) in obj_subset:
+        sub_table_name = f"{model.__name__}_{name}"
+        sub_table = db.connection.table(sub_table_name)
+        is_obj = hasattr(sub_model, "__fields__")
+
+        if is_multi and not is_obj:
+            filtered = sub_table[sub_table[f"{model.__name__}_id"] == row[id_col]]
+            dataset[name] = filtered[name].execute().values.tolist()
             continue
-        elif not is_obj and is_multiple:
-            sub_table = db_connector.connection.table(sub_table_name)
-            rows = sub_table[sub_table[id_col] == row_id].execute()
 
-            if rows.empty:
-                continue
-
-            dataset[attr.name] = rows[attr.name].tolist()
-            continue
-
-        if attr.name not in dataset and is_multiple:
-            dataset[attr.name] = []
-        elif attr.name not in dataset:
-            dataset[attr.name] = {}
-
-        # Filter the sub table by the parent ID
-        _extract_related_rows(
-            model=attr.type_,
-            table_name=sub_table_name,
-            id_col=f"{model.__name__}_id",
-            attr=id_col,
-            target=row_id,
-            query_fun=_query_equal,
-            db_connector=db_connector,
-            dataset=dataset[attr.name],
-            foreign_key=f"{model.__name__}_id",
+        res = _extract_related_rows(
+            table=sub_table,
+            id_col=f"{sub_table_name}_id",
+            query_fun=lambda table: table[id_col] == row[id_col],
+            db=db,
+            model=sub_model,
+            n_jobs=1,
         )
+
+        if not res:
+            continue
+
+        if is_multi:
+            dataset[name] = res
+        else:
+            dataset[name] = res[0]
+
+    return dataset
