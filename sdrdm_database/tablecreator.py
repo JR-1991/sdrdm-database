@@ -1,4 +1,5 @@
 from enum import Enum
+import json
 import os
 import git
 import ibis
@@ -12,8 +13,9 @@ from datetime import datetime, date
 from functools import partial
 from typing import get_origin
 from pydantic import PositiveFloat, StrictBool, create_model
+import yaml
 
-from sdrdm_database.modelutils import convert_md_to_json
+from sdrdm_database.modelutils import convert_md_to_json, rebuild_api
 
 
 TYPE_MAPPING = {
@@ -43,27 +45,30 @@ def create_tables(
 
     _validate_input(db_connector=db_connector, model=model)
 
-    print(f"\n🚀 Creating tables for data model {model.__name__}\n│")
+    if isinstance(model, str):
+        table_name = model
+    elif isinstance(model, DataModel):
+        table_name = model.__name__
 
-    if validators.url(markdown_path):
-        print("├── Fetching markdown model from GitHub")
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            md_content = _fetch_specs(markdown_path, tmpdirname)
-    else:
-        md_content = open(markdown_path).read()
+    print(f"\n🚀 Creating tables for data model {table_name}\n│")
+
+    md_content = _get_md_content(markdown_path=markdown_path)
+
+    if isinstance(model, str):
+        model = _build_model_content(md_content=md_content, name=model)
 
     _add_to_model_table(
-        table_name=model.__name__,
+        table_name=table_name,
         db_connector=db_connector,
         md_content=md_content,
-        obj_name=model.__name__,
+        obj_name=table_name,
     )
 
     # Create schemes for each object found within the data model
     create_instructions = _create_table_schema(
         db_connector=db_connector,
         data_model=model,
-        table_name=model.__name__,
+        table_name=table_name,
         schemes=[],  # type: ignore
     )
 
@@ -131,6 +136,20 @@ def create_tables(
     print(f"│\n╰── 🎉 Created all tables for data model {model.__name__}\n")
 
 
+def _get_md_content(markdown_path: str) -> str:
+    if validators.url(markdown_path):
+        print("├── Fetching markdown model from GitHub")
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            return _fetch_specs(markdown_path, tmpdirname)
+    else:
+        return open(markdown_path).read()
+
+
+def _build_model_content(md_content: str, name: str) -> str:
+    lib = rebuild_api(json.loads(convert_md_to_json(md_content)), name)
+    return getattr(lib, name)
+
+
 def _fetch_specs(url: str, tmpdirname: str):
     git.Repo.clone_from(url, tmpdirname)
 
@@ -150,9 +169,15 @@ def _validate_input(
     model: DataModel,
 ):
     assert db_connector.connection is not None, "No database connection established."
-    assert issubclass(
-        model, DataModel  # type: ignore
-    ), f"Object {model} is not a subclass of DataModel and thus no valid sdRDM object. "
+
+    if not isinstance(model, str):
+        assert issubclass(
+            model, DataModel  # type: ignore
+        ), f"Object {model} is not a subclass of DataModel and thus no valid sdRDM object. "
+    else:
+        assert isinstance(
+            model, str
+        ), f"Object {model} is not a string or DataModel class."
 
     try:
         db_connector.connection.list_tables()
