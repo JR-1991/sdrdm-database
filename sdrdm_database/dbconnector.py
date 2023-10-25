@@ -87,7 +87,7 @@ class DBConnector(BaseModel):
 
         self.__commands__ = self._get_commands()
 
-        if os.environ["TESTING_STAGE"] == "unit_tests":
+        if os.environ.get("TESTING_STAGE") == "unit_tests":
             return
 
         self._connect()
