@@ -109,7 +109,7 @@ def test_postgres():
     ), "Wrong count for primitive list table"
 
     # Retrieve the object again
-    retrieved = db.get("Test", "name", "Hello")[0]
+    retrieved = db.get("Test")[0]
     to_exclude = {
         "id": True,
         "nested": {
