@@ -1,3 +1,4 @@
+import os
 import time
 from enum import Enum
 from itertools import cycle
@@ -85,8 +86,11 @@ class DBConnector(BaseModel):
                 )
 
         self.__commands__ = self._get_commands()
-        self._connect()
 
+        if os.environ["TESTING_STAGE"] == "unit_tests":
+            return
+
+        self._connect()
         self._build_models()
 
         print("🎉 Connected")
