@@ -1,3 +1,5 @@
+from itertools import cycle
+import time
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import ibis
@@ -71,6 +73,7 @@ class DBConnector(BaseModel):
     dbtype: SupportedBackends = SupportedBackends.POSTGRES
     connection: Optional[BaseAlchemyBackend] = None
 
+    __models__: Dict[str, Any] = PrivateAttr({})
     __commands__: Optional[commands.MetaCommands] = PrivateAttr(None)
 
     def __init__(self, **data) -> None:
@@ -88,6 +91,8 @@ class DBConnector(BaseModel):
         self.__commands__ = self._get_commands()
         self._connect()
 
+        self._build_models()
+
     def _connect(self):
         """Attempts to connect to the database using the appropriate connection method.
 
@@ -103,6 +108,54 @@ class DBConnector(BaseModel):
 
         except Exception as e:
             raise ValueError(f"Could not connect to database: {e}") from e
+
+        self._check_connection()
+
+    def _check_connection(self):
+        connected = False
+
+        animation = cycle(list("◐◓◑◒"))
+        while not connected:
+            try:
+                self.connection.list_tables()
+                connected = True
+            except Exception as e:
+                if "Connection refused" not in str(e):
+                    raise e
+
+                print(
+                    f"{next(animation)} Waiting for database to be ready...",
+                    end="\r",
+                )
+                time.sleep(0.2)
+
+        print("🎉 Connected", end="\r")
+
+    def _build_models(self):
+        if "__model_meta__" not in self.connection.list_tables():
+            return
+
+        model_meta = (
+            self.connection.table("__model_meta__").execute().set_index("table")
+        )
+
+        # Build root elements first
+        root_models = model_meta[model_meta.part_of.isna()]
+        root_libs = {}
+
+        for root_name, row in root_models.iterrows():
+            lib = rebuild_api(row.specifications, row.obj_name)
+            root_libs[root_name] = lib
+
+            self.__models__[row.obj_name] = getattr(lib, row.obj_name)
+
+        # Build sub models
+        sub_models = model_meta[model_meta.part_of.notna()]
+        for sub_name, row in sub_models.iterrows():
+            name = sub_name.split("_", 1)[-1]
+
+            self.__models__[sub_name] = getattr(root_libs[row.part_of], row.obj_name)
+            self.__models__[name] = getattr(root_libs[row.part_of], row.obj_name)
 
     def _connect_duckdb(self):
         if self.address is None and self.dbtype == SupportedBackends.DUCKDB:
@@ -261,17 +314,7 @@ class DBConnector(BaseModel):
             self.connection.table("__model_meta__").to_pandas().set_index("table")
         )
 
-        if name not in model_meta.index:
+        if name not in self.__models__:
             raise ValueError(f"Requested model '{name}' is not registered.")
 
-        lib_specs = model_meta.loc[name].specifications
-        obj_name = model_meta.loc[name].obj_name
-
-        if lib_specs is None:
-            part_of = model_meta.loc[name].part_of
-            lib_specs = model_meta.loc[part_of].specifications
-
-        return getattr(
-            rebuild_api(lib_specs, obj_name),
-            obj_name,
-        )
+        return self.__models__[name]
