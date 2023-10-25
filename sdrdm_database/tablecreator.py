@@ -11,7 +11,7 @@ from typing import Optional, List, Dict, get_args
 from datetime import datetime, date
 from functools import partial
 from typing import get_origin
-from pydantic import StrictBool, create_model
+from pydantic import PositiveFloat, StrictBool, create_model
 
 from sdrdm_database.modelutils import convert_md_to_json
 
@@ -23,7 +23,9 @@ TYPE_MAPPING = {
     int: "int64",
     date: "string",
     datetime: "string",
+    bytes: "bytes",
     StrictBool: "boolean",
+    PositiveFloat: "float64",
 }
 
 
@@ -140,7 +142,7 @@ def _fetch_specs(url: str, tmpdirname: str):
     elif len(md_files) > 1:
         raise ValueError(f"More than one markdown file found in {schema_loc}")
 
-    return md_files[0]
+    return open(md_files[0]).read()
 
 
 def _validate_input(
@@ -399,6 +401,9 @@ def _map_type(
         dtype = _get_enum_type(dtype)
 
     mapped_type = TYPE_MAPPING.get(dtype, "NOT_SUPPORTED")
+
+    if "ConstrainedStrValue" in repr(dtype):
+        mapped_type = "string"
 
     if mapped_type == "NOT_SUPPORTED":
         raise ValueError(f"Type '{dtype}' is not supported yet.")
