@@ -232,6 +232,8 @@ def _add_to_model_table(
         ],
     )
 
+    db_connector._build_models()
+
     print(f"├── Added table model '{table_name}' to __model_meta__ table")
 
 
