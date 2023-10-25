@@ -1,10 +1,12 @@
+from enum import Enum
 import strawberry
 
 from sdrdm_database import DBConnector
-from typing import Any, Callable, Optional, Tuple, get_origin, List
+from typing import Any, Callable, Optional, Tuple, get_args, get_origin, List
 from pydantic import create_model
 
 from sdrdm_database.dbconnector import SupportedBackends
+from sdrdm_database.tablecreator import _deconstruct_union_type
 
 
 from typing import Tuple, List, Any, Optional, Callable
@@ -45,21 +47,30 @@ def prepare_graphql(
         dbtype=dbtype,
     )
 
+    model_registry = {}
     model = db.get_table_api(table)
-    dtype = _convert_model(model)
+    dtype = _convert_model(model, model_registry)
+
+    for name, submodel in model_registry.items():
+        schema_type = strawberry.experimental.pydantic.type(
+            model=submodel, all_fields=True
+        )(type(name + "Type", (), {}))
+
+        model_registry[name] = schema_type
 
     def _resolve(id: Optional[str] = None):
         return _resolver_fun(
             db=db,
             table_name=table,
-            dtype=dtype,
+            dtype=model_registry[table],
             id=id,
+            model=dtype,
         )
 
-    return dtype, _resolve
+    return model_registry, _resolve
 
 
-def _convert_model(model):
+def _convert_model(model, registered_models={}):
     """
     Converts a Pydantic model to a Strawberry type.
 
@@ -71,29 +82,50 @@ def _convert_model(model):
     """
     to_model = {}
     for attr in model.__fields__.values():
-        dtype = attr.type_
-        is_obj = hasattr(attr.type_, "__fields__")
-        is_multiple = get_origin(attr.outer_type_) is list
-
-        if is_obj:
-            dtype = _convert_model(attr.type_)
-
-        if is_multiple:
-            to_model[attr.name] = (List[dtype], ...)
-        else:
-            to_model[attr.name] = (attr.type_, ...)
+        dtype = _prepare_dtype(attr, registered_models)
+        to_model[attr.name] = (dtype, ...)
 
     converted = create_model(model.__name__, **to_model)
+    registered_models[model.__name__] = converted
 
-    return strawberry.experimental.pydantic.type(model=converted, all_fields=True)(
-        type(converted.__name__, (), {})
-    )
+    return converted
+
+
+def _prepare_dtype(
+    attr,
+    registered_models,
+):
+    is_multiple = get_origin(attr.outer_type_) is list
+    is_obj = hasattr(attr.type_, "__fields__")
+    dtype = attr.type_
+
+    if get_args(attr.type_):
+        dtype = _deconstruct_union_type(dtype)
+    elif issubclass(attr.type_, Enum):
+        dtype = str
+
+    if is_obj and not dtype.__name__ in registered_models:
+        dtype = _convert_model(
+            attr.type_,
+            registered_models,
+        )
+    elif is_obj and dtype.__name__ in registered_models:
+        dtype = registered_models[dtype.__name__]
+
+    if dtype == bytes:
+        dtype = str
+
+    if is_multiple:
+        return List[dtype]
+    else:
+        return dtype
 
 
 def _resolver_fun(
     db: "DBConnector",
     table_name: str,
     dtype: strawberry.type,
+    model: Any = None,
     id=None,
 ):
     """
