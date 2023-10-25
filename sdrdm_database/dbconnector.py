@@ -1,19 +1,15 @@
-from itertools import cycle
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+from enum import Enum
+from itertools import cycle
+from typing import Any, Dict, List, Optional
 
 import ibis
-
-from ibis.expr.types.relations import Table
 from ibis.backends.base.sql.alchemy import BaseAlchemyBackend
+from ibis.expr.types.relations import Table
 from pydantic import BaseModel, PrivateAttr
-from enum import Enum
 
 from sdrdm_database import commands
-from sdrdm_database.dataio import (
-    _extract_related_rows,
-    insert_into_database,
-)
+from sdrdm_database.dataio import _extract_related_rows, insert_into_database
 from sdrdm_database.modelutils import rebuild_api
 from sdrdm_database.tablecreator import create_tables
 
@@ -93,6 +89,8 @@ class DBConnector(BaseModel):
 
         self._build_models()
 
+        print("🎉 Connected", end="\r")
+
     def _connect(self):
         """Attempts to connect to the database using the appropriate connection method.
 
@@ -128,8 +126,6 @@ class DBConnector(BaseModel):
                     end="\r",
                 )
                 time.sleep(0.2)
-
-        print("🎉 Connected", end="\r")
 
     def _build_models(self):
         if "__model_meta__" not in self.connection.list_tables():
