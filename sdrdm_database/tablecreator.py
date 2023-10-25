@@ -47,7 +47,7 @@ def create_tables(
 
     if isinstance(model, str):
         table_name = model
-    elif isinstance(model, DataModel):
+    elif issubclass(model, DataModel):
         table_name = model.__name__
 
     print(f"\n🚀 Creating tables for data model {table_name}\n│")
