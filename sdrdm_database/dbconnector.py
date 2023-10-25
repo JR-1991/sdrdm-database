@@ -89,7 +89,7 @@ class DBConnector(BaseModel):
 
         self._build_models()
 
-        print("🎉 Connected", end="\r")
+        print("🎉 Connected")
 
     def _connect(self):
         """Attempts to connect to the database using the appropriate connection method.
@@ -110,22 +110,30 @@ class DBConnector(BaseModel):
         self._check_connection()
 
     def _check_connection(self):
-        connected = False
+        timeout = 60
+        current_time = 0
+        incr = 0.2
 
+        connected = False
         animation = cycle(list("◐◓◑◒"))
         while not connected:
             try:
                 self.connection.list_tables()
                 connected = True
             except Exception as e:
-                if "Connection refused" not in str(e):
-                    raise e
+                if current_time >= timeout:
+                    raise ConnectionRefusedError(
+                        f"Could not connect to database: {e}"
+                    ) from e
 
                 print(
                     f"{next(animation)} Waiting for database to be ready...",
                     end="\r",
                 )
-                time.sleep(0.2)
+                time.sleep(incr)
+                current_time += incr
+
+        print(" " * 100, end="\r")
 
     def _build_models(self):
         if "__model_meta__" not in self.connection.list_tables():
