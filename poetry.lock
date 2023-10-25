@@ -2248,4 +2248,4 @@ postgres = []
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "0167968fd28ddf810fad5811d44c84a8c620c1533c7d75fe33581375bc859616"
+content-hash = "49e0a06f370feaf993f26014edb4f5e71bb0bf7d5dd468415bb9f8377b59026b"
