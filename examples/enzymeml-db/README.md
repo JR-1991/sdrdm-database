@@ -1,9 +1,9 @@
 # Example: Building and working with an EnzymeML database
 
-The following example demonstrates a practical example of how to build and work with an EnzymeML database. The example is based on the [EnzymeML schema](https://github.com/EnzymeML/enzymeml-specifications.git) and datasest are provided in `datasets`. The example is based on the following steps:
+The following example demonstrates a practical example of how to build and work with an EnzymeML database. The example is based on the [EnzymeML schema](https://github.com/EnzymeML/enzymeml-specifications.git) and datasets are provided in `datasets`. The example is based on the following steps:
 
 1. Create tables based on the EnzymeML schema
-2. Populate the database with data from the EnzymeML datasets
+2. Populate the database with datasets
 3. Filter the database based on a query for `reactants`
 4. Extract the corresponding EnzymeMLDocuments
 
