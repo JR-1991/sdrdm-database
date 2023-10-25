@@ -1,0 +1,91 @@
+{
+  "id": "enzymemldocument12",
+  "name": "Test 12",
+  "vessels": [
+    {
+      "id": "vessel12",
+      "name": "Vessel",
+      "volume": 10.0,
+      "unit": "mmole / l",
+      "constant": true
+    }
+  ],
+  "proteins": [
+    {
+      "id": "protein12",
+      "name": "Protein",
+      "vessel_id": "vessel12",
+      "constant": true,
+      "sequence": "HJHSJHJSH",
+      "ontology": "SBO:0000013"
+    }
+  ],
+  "reactants": [
+    {
+      "id": "reactant24",
+      "name": "Substrate",
+      "vessel_id": "vessel12",
+      "constant": false,
+      "ontology": "SBO:0000247"
+    },
+    {
+      "id": "reactant25",
+      "name": "Product",
+      "vessel_id": "vessel12",
+      "constant": false,
+      "ontology": "SBO:0000247"
+    }
+  ],
+  "reactions": [
+    {
+      "id": "reaction24",
+      "name": "Forward reaction",
+      "reversible": false,
+      "ontology": "SBO:0000176",
+      "educts": [
+        {
+          "id": "reactionelement48",
+          "species_id": "reactant24",
+          "stoichiometry": 1.0,
+          "constant": false
+        }
+      ],
+      "products": [
+        {
+          "id": "reactionelement49",
+          "species_id": "reactant25",
+          "stoichiometry": 1.0,
+          "constant": false
+        }
+      ]
+    },
+    {
+      "id": "reaction25",
+      "name": "Backward reaction",
+      "reversible": false,
+      "ontology": "SBO:0000176",
+      "educts": [
+        {
+          "id": "reactionelement50",
+          "species_id": "reactant25",
+          "stoichiometry": 1.0,
+          "constant": false
+        }
+      ],
+      "products": [
+        {
+          "id": "reactionelement51",
+          "species_id": "reactant24",
+          "stoichiometry": 1.0,
+          "constant": false
+        }
+      ]
+    }
+  ],
+  "__source__": {
+    "root": "EnzymeMLDocument",
+    "repo": "https://github.com/EnzymeML/enzymeml-specifications.git",
+    "commit": "72c3d8be4a094983667a7aa62fb599fbc9f7351c",
+    "url": "https://github.com/EnzymeML/enzymeml-specifications/tree/72c3d8be4a094983667a7aa62fb599fbc9f7351c"
+  }
+}
