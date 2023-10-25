@@ -7,7 +7,8 @@ from sdrdm_database.graphql import prepare_graphql
 
 # Prepare a single query
 env = toml.load(open("env.toml"))
-model, resolver_fun = prepare_graphql(table="Root", **env)
+model_registry, resolver_fun = prepare_graphql(table="Root", **env)
+model = model_registry["Root"]
 
 
 @strawberry.type
