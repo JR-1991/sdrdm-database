@@ -7,6 +7,11 @@ The following example demonstrates a practical example of how to build and work 
 3. Filter the database based on a query for `reactants`
 4. Extract the corresponding EnzymeMLDocuments
 
+**Files to look into**
+
+* `populate_db.py` - Sets up the database and adds [datasets](/datasets) found in this example
+* `Extract.ipynb` - Demonstrates how to filter a database and recover documentes
+
 ## Database setup
 
 This example includes a `docker-compose`recipe to spawn a new instance of a MySQL database. For this, run the following command:
