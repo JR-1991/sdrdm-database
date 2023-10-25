@@ -44,7 +44,7 @@ def test_postgres():
     # Load model
     lib = DataModel.from_markdown("./.github/integration/model.md")
     db.create_tables(
-        model=lib.Test,
+        model="Test",
         markdown_path="./.github/integration/model.md",
     )
 
