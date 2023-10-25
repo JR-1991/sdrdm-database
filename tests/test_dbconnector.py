@@ -1,8 +1,13 @@
+import os
+
 from sdrdm_database import DBConnector
 from sdrdm_database.commands import PostgresCommands, MySQLCommands
 
 
 def test_commands():
+    # Set global testing to NOT connect
+    os.environ["TESTING_STAGE"] = "unit_tests"
+
     # MySQL case
     db = DBConnector(
         db_name="Test",
