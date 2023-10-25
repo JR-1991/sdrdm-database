@@ -4,10 +4,7 @@ from sdRDM import DataModel
 from sdrdm_database import DBConnector
 
 # Establish a connection to the database
-config = toml.load(open("./env.toml"))
-del config["table"]
-
-db = DBConnector(**config)
+db = DBConnector(**toml.load(open("./env.toml")))
 
 # Fetch the sdRDM schema
 lib = DataModel.from_markdown("./model.md")
