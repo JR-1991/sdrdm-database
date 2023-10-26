@@ -17,8 +17,8 @@ joblib = "^1.3.2"
 typer = "^0.9.0"
 
 [tool.poetry.extras]
-mysql = ["pymysql"]
-postgres = ["psycopg2"]
+mysql = ["sqlalchemy", "pymysql", "sqlalchemy-views"]
+postgres = ["psycopg2", "sqlalchemy", "sqlalchemy-views"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.2"
