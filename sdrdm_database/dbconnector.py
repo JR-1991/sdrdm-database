@@ -67,7 +67,7 @@ class DBConnector(BaseModel):
     password: Optional[str] = None
     port: int = 5432
     address: Optional[str] = None
-    dbtype: SupportedBackends = SupportedBackends.POSTGRES
+    dbtype: SupportedBackends = SupportedBackends.MYSQL
     connection: Optional[BaseAlchemyBackend] = None
 
     __models__: Dict[str, Any] = PrivateAttr({})
