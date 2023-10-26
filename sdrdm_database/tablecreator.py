@@ -4,6 +4,7 @@ import os
 import git
 import ibis
 import tempfile
+import numpy
 import validators
 import glob
 
@@ -12,8 +13,7 @@ from typing import Optional, List, Dict, get_args
 from datetime import datetime, date
 from functools import partial
 from typing import get_origin
-from pydantic import PositiveFloat, StrictBool, create_model
-import yaml
+from pydantic import PositiveFloat, PositiveInt, StrictBool, create_model
 
 from sdrdm_database.modelutils import convert_md_to_json, rebuild_api
 
@@ -28,6 +28,8 @@ TYPE_MAPPING = {
     bytes: "bytes",
     StrictBool: "boolean",
     PositiveFloat: "float64",
+    PositiveInt: "int64",
+    numpy.ndarray: "bytes",
 }
 
 
@@ -78,6 +80,10 @@ def create_tables(
 
     for instruction in create_instructions[::-1]:
         table_name = instruction["name"]
+
+        if instruction["schema"] == {}:
+            instruction["schema"] = {"placeholder": "string"}
+
         schema = ibis.schema(instruction["schema"])  # type: ignore
 
         if table_name in tables:
@@ -132,6 +138,8 @@ def create_tables(
             f"├── Added foreign key '{foreign_key}'({reference_table}) to table {table_name}"
         )
         command()
+
+    db_connector._build_models()
 
     print(f"│\n╰── 🎉 Created all tables for data model {model.__name__}\n")
 
@@ -231,8 +239,6 @@ def _add_to_model_table(
             }
         ],
     )
-
-    db_connector._build_models()
 
     print(f"├── Added table model '{table_name}' to __model_meta__ table")
 
