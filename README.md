@@ -1,6 +1,6 @@
 # sdrdm-database
 
-![Tests](https://github.com/JR-1991/sdrdm-database/actions/workflows/test.yml/badge.svg) ![Integration](https://github.com/JR-1991/sdrdm-database/actions/workflows/integration.yml/badge.svg)
+![Version](https://img.shields.io/pypi/v/sdrdm_database) ![Tests](https://github.com/JR-1991/sdrdm-database/actions/workflows/test.yml/badge.svg) ![Integration](https://github.com/JR-1991/sdrdm-database/actions/workflows/integration.yml/badge.svg)
 
 This is the sdRDM DB interface to create tables from a markdown model and insert/retrieve data from it.
 
