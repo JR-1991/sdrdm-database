@@ -244,7 +244,7 @@ def _process_row(
         is_obj = hasattr(sub_model, "__fields__")
 
         if is_multi and not is_obj:
-            filtered = sub_table[sub_table[f"{model.__name__}_id"] == row[id_col]]
+            filtered = sub_table[sub_table[id_col] == row[id_col]]
             dataset[name] = filtered[name].execute().values.tolist()
             continue
 
