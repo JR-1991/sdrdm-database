@@ -13,7 +13,10 @@ from sdrdm_database import DBConnector
 db = DBConnector(**toml.load(open("./env.toml")))
 
 # Create tables from the EnzymeML schema
-db.create_tables("EnzymeMLDocument", markdown_path=url)
+db.create_tables(
+  "EnzymeMLDocument",
+  "https://github.com/EnzymeML/enzymeml-specifications.git"
+)
 
 # Add some datasets
 datasets = [DataModel.parse(file)[0] for file in glob.glob("./datasets/*.json")]
