@@ -1,8 +1,7 @@
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, get_origin
+from typing import Any, List, get_origin
 from typing import get_origin
-from joblib import Parallel, delayed
-import pandas as pd
+from sqlalchemy.orm import Session
 
 
 def insert_into_database(
@@ -129,140 +128,126 @@ def _insert_primitive_array(
         db.connection.insert(table, to_insert)
 
 
-def _extract_related_rows(
-    table,
-    id_col: str,
-    db: "DBConnector",
-    model: "DataModel",
-    query_fun: Optional[Callable] = None,
-    n_jobs: int = -1,
-    MAX_ROWS: int = 20,
-) -> List[Tuple[int, Dict[str, Any]]]:
-    """Extracts related rows from a database table.
+def _retrieve_documents(db, table_name):
+    """Retrieves all documents from a given table in the database.
 
     Args:
-        table: The database table to extract rows from.
-        id_col: The name of the column containing the row IDs.
-        db: The database connection object.
-        model: The Pydantic model representing the table schema.
-        query_fun: Optional function to filter rows before extraction.
-        n_jobs: Number of parallel jobs to use for extraction.
-        MAX_ROWS: Maximum number of rows to extract.
+        db (DBConnector): A DBConnector object representing the database.
+        table_name (str): The name of the table to retrieve documents from.
 
     Returns:
-        A list of tuples, where each tuple contains the row ID and a dictionary
-        of the row's attribute values.
+        list: A list of documents retrieved from the table.
     """
+    assert (
+        db.__class__.__name__ == "DBConnector"
+    ), "Database must be a DBConnector object"
+    assert table_name in db.__models__, "Table has no associated model"
+    assert db.engine, "Database engine must be set"
+    assert db.__sqlalchemy_classes__, "SQLAlchemy classes must be set"
 
-    # Extract data
-    if query_fun:
-        rows = table[query_fun(table)].execute()
-    else:
-        rows = table.execute().iloc[0:MAX_ROWS]
-
-    subset = list(model.__fields__.keys())
-    subset.remove("id")
-
-    # Find out, which attributes are objects
-    obj_subset = [
-        (
-            attr.type_,
-            attr.name,
-            get_origin(attr.outer_type_) == list,
-        )
-        for attr in model.__fields__.values()
-        if hasattr(attr.type_, "__fields__") or get_origin(attr.outer_type_) == list
-    ]
-
-    if db.dbtype.value == "mysql":
-        data = []
-        for _, row in rows.iterrows():
-            data.append(
-                _process_row(
-                    row=row,
-                    subset=subset,
-                    obj_subset=obj_subset,
-                    id_col=id_col,
-                    model=model,
-                    db=db,
-                )
-            )
-
-        return data
-
-    return Parallel(n_jobs=n_jobs, backend="threading")(
-        delayed(_process_row)(
-            row=row,
-            subset=subset,
-            obj_subset=obj_subset,
-            id_col=id_col,
-            model=model,
-            db=db,
-        )
-        for _, row in rows.iterrows()
-    )
+    with Session(db.engine) as session:
+        model = db.get_table_api(table_name)
+        automap_cls = getattr(db.__sqlalchemy_classes__, table_name)
+        objects = session.query(automap_cls).all()
+        return [model(**_extract_document(obj)) for obj in objects]
 
 
-def _process_row(
-    row,
-    subset,
-    obj_subset,
-    id_col,
-    model,
-    db,
-):
+def _extract_document(obj):
     """
-    Processes a single row of data from a database table.
+    Extracts a dictionary representation of an automapped object and its children.
 
     Args:
-        row (pandas.Series): A single row of data from a database table.
-        subset (List[str]): A list of column names to include in the processed data.
-        obj_subset (List[Tuple[type, str, bool]]): A list of tuples representing related objects to include in the processed data. Each tuple contains:
-            - A reference to the related object's model class
-            - The name of the related object's attribute in the processed data
-            - A boolean indicating whether the related object is a single object or a list of objects
-        id_col (str): The name of the column containing the primary key ID for the table.
-        model (type): The model class for the table being processed.
-        db (Database): The database object containing the table being processed.
+        obj: An automapped object.
 
     Returns:
-        dict: A dictionary containing the processed data for the input row, including related objects as specified in obj_subset.
+        A dictionary representation of the object and its children.
     """
 
-    subset = [col for col in subset if col in row]
-    row = row.where(pd.notnull(row), None)
-    dataset = row[subset].to_dict()
-    dataset["id"] = row[id_col]
+    assert _is_automap(obj), "Object must be an automapped object"
 
-    for (
-        sub_model,
-        name,
-        is_multi,
-    ) in obj_subset:
-        sub_table_name = f"{model.__name__}_{name}"
-        sub_table = db.connection.table(sub_table_name)
-        is_obj = hasattr(sub_model, "__fields__")
+    collections = _get_collections(obj)
+    multi_names = _extract_attr_names(collections)
+    table_name = _get_table_name(obj)
+    foreign_keys = _get_foreign_keys(obj)
+    forbidden_keys = foreign_keys + collections
 
-        if is_multi and not is_obj:
-            filtered = sub_table[sub_table[id_col] == row[id_col]]
-            dataset[name] = filtered[name].execute().values.tolist()
+    dataset = {
+        key.replace(table_name + "_", "", 1): value
+        for key, value in obj.__dict__.items()
+        if key not in forbidden_keys and not key.startswith("_")
+    }
+
+    for collection, multi_name in zip(collections, multi_names):
+        collection = getattr(obj, collection)
+
+        if collection == []:
             continue
 
-        res = _extract_related_rows(
-            table=sub_table,
-            id_col=f"{sub_table_name}_id",
-            query_fun=lambda table: table[id_col] == row[id_col],
-            db=db,
-            model=sub_model,
-            n_jobs=1,
-        )
-
-        if not res:
-            continue
-
-        if is_multi:
-            dataset[name] = res
-        else:
-            dataset[name] = res[0]
+        dataset[multi_name] = [_extract_document(child) for child in collection]
 
     return dataset
+
+
+def _is_automap(obj):
+    """
+    Checks if an object is an automapped object.
+
+    Args:
+        obj: An object.
+
+    Returns:
+        True if the object is an automapped object, False otherwise.
+    """
+    return obj.__module__ == "sqlalchemy.ext.automap"
+
+
+def _get_collections(obj):
+    """
+    Gets a list of collections in an automapped object.
+
+    Args:
+        obj: An automapped object.
+
+    Returns:
+        A list of collections in the automapped object.
+    """
+    return [attr for attr in obj.__dir__() if attr.endswith("_collection")]
+
+
+def _extract_attr_names(collections):
+    """
+    Extracts attribute names from a list of collections.
+
+    Args:
+        collections: A list of collections.
+
+    Returns:
+        A list of attribute names extracted from the collections.
+    """
+    return [attr.split("_", 1)[-1].split("_collection", -1)[0] for attr in collections]
+
+
+def _get_table_name(obj):
+    """
+    Gets the name of the table associated with an automapped object.
+
+    Args:
+        obj: An automapped object.
+
+    Returns:
+        The name of the table associated with the automapped object.
+    """
+    return obj.__class__.__table__.name
+
+
+def _get_foreign_keys(obj):
+    """
+    Gets a list of foreign keys associated with an automapped object.
+
+    Args:
+        obj: An automapped object.
+
+    Returns:
+        A list of foreign keys associated with the automapped object.
+    """
+    return [key.column.name for key in obj.__class__.__table__.foreign_keys]
