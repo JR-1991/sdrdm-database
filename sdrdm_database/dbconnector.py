@@ -6,8 +6,8 @@ from typing import Any, Dict, List, Optional
 
 import ibis
 from ibis.backends.base.sql.alchemy import BaseAlchemyBackend
-from ibis.expr.types.relations import Table
 from pydantic import BaseModel, PrivateAttr
+from bigtree import Node, find_child_by_name
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy import create_engine
 
@@ -15,6 +15,7 @@ from sdrdm_database import commands
 from sdrdm_database.dataio import _retrieve_documents, insert_into_database
 from sdrdm_database.modelutils import rebuild_api
 from sdrdm_database.tablecreator import create_tables
+from sdrdm_database.treeutils import get_model_tree
 
 
 class SupportedBackends(str, Enum):
@@ -74,6 +75,7 @@ class DBConnector(BaseModel):
     engine: Optional[Any] = None
 
     __sqlalchemy_classes__: Optional[Any] = PrivateAttr(None)
+    __relationships__: Dict[str, Node] = PrivateAttr({})
     __models__: Dict[str, Any] = PrivateAttr({})
     __commands__: Optional[commands.MetaCommands] = PrivateAttr(None)
 
@@ -95,7 +97,10 @@ class DBConnector(BaseModel):
             return
 
         self._connect()
-        self._build_models()
+
+        if "__model_meta__" in self.connection.list_tables():
+            self._build_models()
+            self._construct_relation_trees()
 
         print("🎉 Connected")
 
@@ -168,8 +173,29 @@ class DBConnector(BaseModel):
         for sub_name, row in sub_models.iterrows():
             name = sub_name.split("_", 1)[-1]
 
+            if sub_name not in self.__models__:
+                # Multiple primitive table
+                continue
+
             self.__models__[sub_name] = getattr(root_libs[row.part_of], row.obj_name)
             self.__models__[name] = getattr(root_libs[row.part_of], row.obj_name)
+
+    def _construct_relation_trees(self):
+        """Generate relationship trees for join queries."""
+
+        model_meta = self.connection.table("__model_meta__").execute()
+        roots = model_meta[model_meta.part_of.isna()]
+
+        for name in roots.table:
+            self.__relationships__[name] = get_model_tree(self, name)
+
+        sub_trees = model_meta[model_meta.part_of.notna()]
+
+        for _, row in sub_trees.iterrows():
+            parent_tree = self.__relationships__[row.part_of]
+            self.__relationships__[row.table] = find_child_by_name(
+                parent_tree, row.table
+            )
 
     def _connect_engine(self, address: str):
         """Connect to the database using the SQLAlchemy engine."""
@@ -264,6 +290,11 @@ class DBConnector(BaseModel):
                 model=model,
                 markdown_path=markdown_path,
             )
+
+            # Build ORM related stuff
+            self._build_models()
+            self._automap_classes()
+            self._construct_relation_trees()
         except ConnectionRefusedError as e:
             print(
                 "❌ Couldnt connect to database. Please check your credentials or status of the database."
@@ -292,27 +323,27 @@ class DBConnector(BaseModel):
     def get(
         self,
         table_name: str,
+        criteria: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List["DataModel"]:
         """
-        Retrieves rows from the specified table that match the given attribute and value.
+        Retrieves rows from the specified table that match the given criteria.
 
         Args:
             table_name (str): The name of the table to retrieve rows from.
-            filtered_table (Optional[Table], optional): A filtered table. Defaults to None.
-            max_rows (int, optional): The maximum number of rows to retrieve. Defaults to 10.
-
+            criteria (Optional[Dict[str, Dict[str, Any]]]): A dictionary of criteria to filter the rows by.
         Returns:
             List[DataModel]: A list of DataModel objects that contain the retrieved rows.
 
         Raises:
             ValueError: If the requested model is not registered.
+            AssertionError: If the specified table does not exist.
         """
 
         assert (
             table_name in self.connection.list_tables()
         ), f"Table '{table_name}' does not exist."
 
-        return _retrieve_documents(self, table_name)
+        return _retrieve_documents(self, table_name, criteria)
 
     # ! API Tools
     def get_table_api(self, name: str):
