@@ -16,6 +16,7 @@ strawberry-graphql = "^0.209.8"
 joblib = "^1.3.2"
 typer = "^0.9.0"
 sqlalchemy = "^2.0.22"
+bigtree = "^0.14.3"
 
 [tool.poetry.extras]
 mysql = ["pymysql", "sqlalchemy-views", "mysql-connector-python"]
