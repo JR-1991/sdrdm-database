@@ -317,7 +317,6 @@ def _create_table_schema(
                 table_name=sub_table_name,
                 schemes=schemes,
                 parent=table_name,
-                is_primitive=True,
             )
         elif is_obj:
             _create_table_schema(
