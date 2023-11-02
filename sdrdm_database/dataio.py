@@ -1,7 +1,10 @@
 from functools import partial
-from typing import Any, List, get_origin
+from typing import Any, Dict, List, get_origin
 from typing import get_origin
 from sqlalchemy.orm import Session
+from bigtree import levelordergroup_iter
+
+from sdrdm_database.treeutils import _prune_by_criteria
 
 
 def insert_into_database(
@@ -128,7 +131,11 @@ def _insert_primitive_array(
         db.connection.insert(table, to_insert)
 
 
-def _retrieve_documents(db, table_name):
+def _retrieve_documents(
+    db: "DBConnector",
+    table_name: str,
+    criteria: Dict[str, Dict[str, Any]] = None,
+):
     """Retrieves all documents from a given table in the database.
 
     Args:
@@ -147,9 +154,92 @@ def _retrieve_documents(db, table_name):
 
     with Session(db.engine) as session:
         model = db.get_table_api(table_name)
-        automap_cls = getattr(db.__sqlalchemy_classes__, table_name)
-        objects = session.query(automap_cls).all()
-        return [model(**_extract_document(obj)) for obj in objects]
+
+        if criteria is None:
+            results = _query_all(
+                db=db,
+                target_table=table_name,
+                session=session,
+            )
+        else:
+            _validate_criteria(db, criteria)
+            results = _query_by_criteria(
+                db=db,
+                target_table=table_name,
+                session=session,
+                criteria=criteria,
+            )
+
+        return [model(**_extract_document(obj)) for obj in results]
+
+
+def _query_all(
+    db: "DBConnector",
+    target_table: str,
+    session,
+):
+    """Returns all objects of a given automapped class from a DB."""
+    automap_cls = getattr(db.__sqlalchemy_classes__, target_table)
+    return session.query(automap_cls).all()
+
+
+def _query_by_criteria(
+    db: "DBConnector",
+    target_table: str,
+    session,
+    criteria: Dict[str, Dict[str, str]],
+):
+    """
+    Queries the database for rows in the target table that match the given criteria.
+
+    Args:
+        db: A `DBConnector` instance representing the database to query.
+        target_table: A string representing the name of the table to query.
+        criteria: A dictionary representing the criteria to filter the query by.
+
+    Returns:
+        A list of rows from the target table that match the given criteria.
+    """
+
+    root_cls = getattr(db.__sqlalchemy_classes__, target_table)
+    tree = db.__relationships__[target_table]
+
+    # Retrieve a tree with only the tables that are relevant to the query
+    to_join = _prune_by_criteria(tree, criteria)
+    query = session.query(root_cls)
+
+    # Join the tables in the tree
+    for group in levelordergroup_iter(to_join):
+        for node in group:
+            if node.name == target_table:
+                continue
+
+            automap_cls = getattr(db.__sqlalchemy_classes__, node.name)
+            query = query.join(automap_cls)
+
+    # Filter the query by the criteria
+    for table, attributes in criteria.items():
+        automap_cls = getattr(db.__sqlalchemy_classes__, table)
+
+        for attr, value in attributes.items():
+            assert hasattr(
+                automap_cls, attr
+            ), f"{table} does not have attribute '{attr}'"
+
+            get = getattr(automap_cls, attr) == value
+            query = query.filter(get)
+
+    return query.all()
+
+
+def _validate_criteria(
+    db: "DBConnector",
+    criteria: Dict[str, Dict[str, Any]],
+):
+    """Checks whether given tables are existent in the database."""
+    tables = db.connection.list_tables()
+    for table in criteria.keys():
+        assert table in tables, f"Table '{table}' does not exist in the database"
 
 
 def _extract_document(obj):
