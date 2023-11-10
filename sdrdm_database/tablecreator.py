@@ -72,6 +72,7 @@ def create_tables(
         data_model=model,
         table_name=table_name,
         schemes=[],  # type: ignore
+        parent=[]
     )
 
     # Create tables and add foreign keys
@@ -91,7 +92,7 @@ def create_tables(
             continue
 
         # Register the sub model
-        if not instruction["is_primitive"]:
+        if not instruction["is_primitive"] and not instruction["is_linking"]:
             _add_to_model_table(
                 db_connector=db_connector,
                 md_content=md_content,
@@ -275,8 +276,10 @@ def _create_table_schema(
     data_model: "DataModel",
     table_name: str,
     schemes: List[Dict],
-    parent: Optional[str] = None,
+    parent: List=None,
     is_primitive: bool = False,
+    is_linking: bool = False,
+    created: List=None,
 ):
     """Creates a table schema for a given DataModel object.
 
@@ -290,15 +293,21 @@ def _create_table_schema(
     Returns:
         List[Dict]: A list of table schema dictionaries.
     """
+    if created is None: 
+        created = []
+
+    if parent is None:
+        parent = []
 
     schema, fk_commands = {}, []
 
-    _handle_foreign_keys(
-        parent=parent,
-        table_name=table_name,
-        db_connector=db_connector,
-        fk_commands=fk_commands,
-    )
+    for foreignkey in parent:
+        _handle_foreign_keys(
+            parent=foreignkey,
+            table_name=table_name,
+            db_connector=db_connector,
+            fk_commands=fk_commands,
+        )
 
     for attr in data_model.__fields__.values():
         is_obj = hasattr(attr.type_, "__fields__")
@@ -307,7 +316,8 @@ def _create_table_schema(
 
         if attr.name == "id":
             continue
-        elif is_multiple and not is_obj:
+        #add List of primitives
+        elif is_multiple and not is_obj: 
             _create_table_schema(
                 db_connector=db_connector,
                 data_model=create_model(
@@ -316,16 +326,50 @@ def _create_table_schema(
                 ),
                 table_name=sub_table_name,
                 schemes=schemes,
-                parent=table_name,
+                parent=[table_name],
                 is_primitive=True,
+                created=created,
             )
+        #add linkingtable for that list
+        elif is_multiple and is_obj: 
+            link_table_name = f"{table_name}_{attr.name}_{attr.type_.__name__}"   
+            objectname = attr.type_.__name__
+            
+            #the table to reference does not exist yet, therefor create it
+            if objectname not in created: 
+                _create_table_schema(
+                db_connector=db_connector,
+                data_model=create_model(
+                    objectname,
+                    **{attr.name: (attr.type_, ...)},
+                ),
+                table_name=objectname,
+                schemes=schemes,
+                is_primitive=False,
+                created=created,
+            )   
+            #add the linkingtable itself
+            _create_table_schema(
+                db_connector=db_connector,
+                data_model=create_model(
+                    objectname,
+                    **{attr.name: (attr.type_, ...)},
+                ),
+                table_name=link_table_name,
+                schemes=schemes,
+                is_primitive=False,
+                created=created,
+            ) 
+        #add referenced object 
         elif is_obj:
             _create_table_schema(
                 db_connector=db_connector,
                 data_model=attr.type_,
                 table_name=sub_table_name,
                 schemes=schemes,
-                parent=table_name,
+                parent=[table_name],
+                is_primitive=False,
+                created=created,
             )
         else:
             _populate_schema(attr=attr, schema=schema)
@@ -336,17 +380,31 @@ def _create_table_schema(
         primary_key=f"{table_name}_id",
         dbconnector=db_connector,
     )
-
-    schemes.append(
-        {
-            "name": table_name,
-            "obj_name": data_model.__name__,
-            "schema": schema,
-            "pk_command": pk_fun,
-            "fk_commands": fk_commands,
-            "is_primitive": is_primitive,
-        }
-    )
+    created.append(table_name)
+    if not is_linking:
+        schemes.insert(0,
+            {
+                "name": table_name,
+                "obj_name": data_model.__name__,
+                "schema": schema,
+                "pk_command": pk_fun,
+                "fk_commands": fk_commands,
+                "is_primitive": is_primitive,
+                "is_linking": is_linking,
+            }
+        )
+    else:
+        schemes.append(
+            {
+                "name": table_name,
+                "obj_name": data_model.__name__,
+                "schema": schema,
+                "pk_command": pk_fun,
+                "fk_commands": fk_commands,
+                "is_primitive": is_primitive,
+                "is_linking": is_linking,
+            }
+        )
 
     return schemes
 
