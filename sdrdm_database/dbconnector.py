@@ -271,6 +271,7 @@ class DBConnector(BaseModel):
         filtered_table: Optional[Table] = None,
         max_rows: int = 10,
         model: Optional["DataModel"] = None,
+        query_all: bool = False,
     ) -> List["DataModel"]:
         """
         Retrieves rows from the specified table that match the given attribute and value.
@@ -291,7 +292,10 @@ class DBConnector(BaseModel):
             table = filtered_table
         else:
             table = self.connection.table(table_name)
-
+        
+        if query_all or max_rows == -1:
+            max_rows = table.count().to_pandas()
+            
         if model is None:
             model = self.get_table_api(table_name)
 
