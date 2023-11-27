@@ -178,7 +178,10 @@ class DBConnector(BaseModel):
         assert self.port, "Port must be specified for Postgres"
         assert self.db_name, "Database name must be specified for Postgres"
 
-        return ibis.postgres.connect(
+        # Create engine
+        address = self._create_address("postgres", "psycopg2")
+
+        return address, ibis.postgres.connect(
             user=self.username,
             password=self.password,
             host=self.host,
