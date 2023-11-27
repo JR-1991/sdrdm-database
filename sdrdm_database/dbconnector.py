@@ -20,8 +20,6 @@ from sdrdm_database.treeutils import get_model_tree
 
 class SupportedBackends(str, Enum):
     POSTGRES = "postgres"
-    SQLITE = "sqlite"
-    DUCKDB = "duckdb"
     MYSQL = "mysql"
 
 
