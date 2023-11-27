@@ -176,6 +176,9 @@ class DBConnector(BaseModel):
                 continue
 
             self.__models__[sub_name] = getattr(root_libs[row.part_of], row.obj_name)
+            self.__models__[row.obj_name] = getattr(
+                root_libs[row.part_of], row.obj_name
+            )
             self.__models__[name] = getattr(root_libs[row.part_of], row.obj_name)
 
     def _construct_relation_trees(self):
