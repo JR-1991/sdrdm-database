@@ -171,7 +171,7 @@ class DBConnector(BaseModel):
         for sub_name, row in sub_models.iterrows():
             name = sub_name.split("_", 1)[-1]
 
-            if sub_name not in self.__models__:
+            if sub_name not in sub_models.index:
                 # Multiple primitive table
                 continue
 
@@ -361,9 +361,6 @@ class DBConnector(BaseModel):
         Raises:
             ValueError: If the requested model is not registered.
         """
-        model_meta = (
-            self.connection.table("__model_meta__").to_pandas().set_index("table")
-        )
 
         if name not in self.__models__:
             raise ValueError(f"Requested model '{name}' is not registered.")
