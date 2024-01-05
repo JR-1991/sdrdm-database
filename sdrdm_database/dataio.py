@@ -26,7 +26,7 @@ def insert_into_database(
         table_name = dataset.__class__.__name__
 
     sub_objects = {}
-    to_exclude = set(["id"])
+    to_exclude = set()
     post_insert = []
 
     for key, value in dataset:
@@ -51,14 +51,7 @@ def insert_into_database(
             post_insert.append(partial(_insert_primitive_array, **kwargs))
             to_exclude.add(key)
 
-    to_insert = {
-        **dataset.dict(exclude=to_exclude),
-        f"{table_name}_id": str(dataset.__id__),
-    }
-
-    if parent_id is not None:
-        assert parent_col is not None, "Parent column must be specified"
-        to_insert[f"{parent_col}_id"] = parent_id
+    to_insert = dataset.dict(exclude=to_exclude)
 
     db.connection.insert(table_name, to_insert)
 
