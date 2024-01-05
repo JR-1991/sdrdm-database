@@ -155,8 +155,6 @@ class DBConnector(BaseModel):
             lib = rebuild_api(row.specifications, row.obj_name)
             root_libs[root_name] = lib
 
-            self.__models__[row.obj_name] = getattr(lib, row.obj_name)
-
         # Build sub models
         sub_models = model_meta[model_meta.part_of.notna()]
         for sub_name, row in sub_models.iterrows():
@@ -224,7 +222,6 @@ class DBConnector(BaseModel):
     # ! Table creation
     def create_tables(
         self,
-        model: "DataModel",
         markdown_path: str,
     ):
         """Creates tables in the database from a DataModel.
@@ -237,7 +234,6 @@ class DBConnector(BaseModel):
         try:
             create_tables(
                 db_connector=self,
-                model=model,
                 markdown_path=markdown_path,
             )
         except ConnectionRefusedError as e:
