@@ -1,21 +1,21 @@
 from enum import Enum
 import json
-import os
-import git
 import ibis
-import tempfile
 import numpy
 import validators
-import glob
 
 from sdRDM import DataModel
-from typing import Optional, List, Dict, get_args
+from typing import Optional, Dict, get_args
 from datetime import datetime, date
 from functools import partial
 from typing import get_origin
-from pydantic import PositiveFloat, PositiveInt, StrictBool, create_model
+from pydantic import PositiveFloat, PositiveInt, StrictBool
 
-from sdrdm_database.modelutils import convert_md_to_json, rebuild_api
+from sdrdm_database.modelutils import (
+    convert_md_to_json,
+    extract_lib_relations,
+    get_md_content,
+)
 
 
 TYPE_MAPPING = {
@@ -33,11 +33,7 @@ TYPE_MAPPING = {
 }
 
 
-def create_tables(
-    db_connector: "DBConnector",
-    model: "DataModel",
-    markdown_path: str,
-):
+def create_tables(db_connector: "DBConnector", markdown_path: str):
     """Creates tables according to the given sdRDM data model.
 
     Args:
@@ -45,76 +41,84 @@ def create_tables(
         model (DataModel): The model to create tables for.
     """
 
-    _validate_input(db_connector=db_connector, model=model)
+    _validate_input(db_connector=db_connector)
 
-    if isinstance(model, str):
-        table_name = model
-    elif issubclass(model, DataModel):
-        table_name = model.__name__
+    print(f"\n🚀 Creating tables for data model {markdown_path}\n│")
 
-    print(f"\n🚀 Creating tables for data model {table_name}\n│")
+    if validators.url(markdown_path):
+        lib = DataModel.from_git(markdown_path)
+    else:
+        lib = DataModel.from_markdown(markdown_path)
 
-    md_content = _get_md_content(markdown_path=markdown_path)
+    ############################
+    # Hier werden die Relationen aus dem DataModel extrahiert
+    # und entsprechen der Namenskonvention die wir gewählt haben
 
-    if isinstance(model, str):
-        model = _build_model_content(md_content=md_content, name=model)
+    relations = extract_lib_relations(lib)
 
+    # Ich empfehle für das weitere Vorgehen, dass du über die Relationen
+    # iterierst und jeweils die Tabellen erstellst. Orientiere dich dabei
+    # an commands.py und füge evtl für MySQL sowie PostgreSQL die entsprechenden
+    # Befehle hinzu.
+    ############################
+
+    md_content = get_md_content(markdown_path)
+    root_name = "DATA_MODEL"
     _add_to_model_table(
-        table_name=table_name,
+        table_name=root_name,
         db_connector=db_connector,
         md_content=md_content,
-        obj_name=table_name,
+        obj_name=root_name,
     )
+
+    ############################
+    # Kannst du gerne löschen, dient nur zur Veranschaulichung der Relations
+
+    print(f"├── Extracted relations from data model {markdown_path}")
+    print(json.dumps(relations, indent=2), end="\n\n")
+
+    #############################
 
     # Create schemes for each object found within the data model
-    create_instructions = _create_table_schema(
-        db_connector=db_connector,
-        data_model=model,
-        table_name=table_name,
-        schemes=[],  # type: ignore
-        parent=[]
-    )
+    instructions = []
+    for obj in lib.__dict__.values():
+        if not hasattr(obj, "__fields__"):
+            continue
 
-    # Create tables and add foreign keys
-    fk_commands, pk_commands = [], []
+        table_name = obj.__name__
+        instructions.append(
+            _create_table_schema(
+                db_connector=db_connector,
+                data_model=obj,
+                table_name=table_name,
+            )
+        )
+
+        _add_to_model_table(
+            table_name=table_name,
+            db_connector=db_connector,
+            md_content=md_content,
+            obj_name=table_name,
+            part_of=root_name,
+        )
+
     tables = db_connector.connection.list_tables()
+    pk_commands = []
 
-    for instruction in create_instructions[::-1]:
+    for instruction in instructions:
         table_name = instruction["name"]
-
-        if instruction["schema"] == {}:
-            instruction["schema"] = {"placeholder": "string"}
-
         schema = ibis.schema(instruction["schema"])  # type: ignore
 
         if table_name in tables:
             print(f"├── Table '{table_name}'. Already exists in database. Skipping.")
             continue
 
-        # Register the sub model
-        if not instruction["is_primitive"] and not instruction["is_linking"]:
-            _add_to_model_table(
-                db_connector=db_connector,
-                md_content=md_content,
-                table_name=table_name,
-                part_of=model.__name__,
-                obj_name=instruction["obj_name"],
-            )
-
         # Create the table
-        db_connector.connection.create_table(
-            table_name,
-            schema=schema,
-        )
-
-        if instruction["is_primitive"] is False:
-            pk_commands.append(instruction["pk_command"])
-
+        db_connector.connection.create_table(table_name, schema=schema)
+        pk_commands.append(instruction["pk_command"])
         tables.append(table_name)
 
         print(f"├── Created table '{table_name}'")
-
-        fk_commands += instruction["fk_commands"]
 
     for command in pk_commands:
         primary_key = command.keywords["primary_key"]
@@ -123,70 +127,22 @@ def create_tables(
 
         print(f"├── Added primary key '{primary_key}' to table {table_name}")
 
-    for command in fk_commands:
-        foreign_key = command.keywords["foreign_key"]
-        reference_table = command.keywords["reference_table"]
-        table_name = command.keywords["table_name"]
-        table = db_connector.connection.table(table_name)
-
-        if foreign_key in table.columns:
-            print(
-                f"├── Skipping foreign key '{foreign_key}'({reference_table}). Already exists in table {table_name}"
-            )
-            continue
-
-        print(
-            f"├── Added foreign key '{foreign_key}'({reference_table}) to table {table_name}"
-        )
-        command()
-
     db_connector._build_models()
 
-    print(f"│\n╰── 🎉 Created all tables for data model {model.__name__}\n")
+    print(f"│\n╰── 🎉 Created all tables for data model {markdown_path}\n")
 
 
-def _get_md_content(markdown_path: str) -> str:
-    if validators.url(markdown_path):
-        print("├── Fetching markdown model from GitHub")
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            return _fetch_specs(markdown_path, tmpdirname)
-    else:
-        return open(markdown_path).read()
+def _validate_input(db_connector: "DBConnector"):
+    """
+    Validates the input parameters for the _validate_input function.
 
+    Args:
+        db_connector (DBConnector): The database connector object.
 
-def _build_model_content(md_content: str, name: str) -> str:
-    lib = rebuild_api(json.loads(convert_md_to_json(md_content)), name)
-    return getattr(lib, name)
-
-
-def _fetch_specs(url: str, tmpdirname: str):
-    git.Repo.clone_from(url, tmpdirname)
-
-    schema_loc = os.path.join(tmpdirname, "specifications")
-    md_files = glob.glob(f"{schema_loc}/*.md")
-
-    if len(md_files) == 0:
-        raise ValueError(f"No markdown files found in {schema_loc}")
-    elif len(md_files) > 1:
-        raise ValueError(f"More than one markdown file found in {schema_loc}")
-
-    return open(md_files[0]).read()
-
-
-def _validate_input(
-    db_connector: "DBConnector",
-    model: DataModel,
-):
+    Raises:
+        Exception: If no database connection is established or if there is an error connecting to the database.
+    """
     assert db_connector.connection is not None, "No database connection established."
-
-    if not isinstance(model, str):
-        assert issubclass(
-            model, DataModel  # type: ignore
-        ), f"Object {model} is not a subclass of DataModel and thus no valid sdRDM object. "
-    else:
-        assert isinstance(
-            model, str
-        ), f"Object {model} is not a string or DataModel class."
 
     try:
         db_connector.connection.list_tables()
@@ -244,9 +200,7 @@ def _add_to_model_table(
     print(f"├── Added table model '{table_name}' to __model_meta__ table")
 
 
-def _create_model_meta_table(
-    db_connector: "DBConnector",
-):
+def _create_model_meta_table(db_connector: "DBConnector"):
     """Creates a table named __model_meta__ in the database if it doesn't exist.
 
     Args:
@@ -275,11 +229,6 @@ def _create_table_schema(
     db_connector: "DBConnector",
     data_model: "DataModel",
     table_name: str,
-    schemes: List[Dict],
-    parent: List=None,
-    is_primitive: bool = False,
-    is_linking: bool = False,
-    created: List=None,
 ):
     """Creates a table schema for a given DataModel object.
 
@@ -293,158 +242,38 @@ def _create_table_schema(
     Returns:
         List[Dict]: A list of table schema dictionaries.
     """
-    if created is None: 
-        created = []
 
-    if parent is None:
-        parent = []
-
-    schema, fk_commands = {}, []
-
-    for foreignkey in parent:
-        _handle_foreign_keys(
-            parent=foreignkey,
-            table_name=table_name,
-            db_connector=db_connector,
-            fk_commands=fk_commands,
-        )
+    schema = {}
 
     for attr in data_model.__fields__.values():
         is_obj = hasattr(attr.type_, "__fields__")
         is_multiple = get_origin(attr.outer_type_) is list
-        sub_table_name = f"{data_model.__name__}_{attr.name}"
 
         if attr.name == "id":
             continue
-        #add List of primitives
-        elif is_multiple and not is_obj: 
-            _create_table_schema(
-                db_connector=db_connector,
-                data_model=create_model(
-                    attr.name,
-                    **{attr.name: (attr.type_, ...)},
-                ),
-                table_name=sub_table_name,
-                schemes=schemes,
-                parent=[table_name],
-                is_primitive=True,
-                created=created,
-            )
-        #add linkingtable for that list
-        elif is_multiple and is_obj: 
-            link_table_name = f"{table_name}_{attr.name}_{attr.type_.__name__}"   
-            objectname = attr.type_.__name__
-            
-            #the table to reference does not exist yet, therefor create it
-            if objectname not in created: 
-                _create_table_schema(
-                db_connector=db_connector,
-                data_model=create_model(
-                    objectname,
-                    **{attr.name: (attr.type_, ...)},
-                ),
-                table_name=objectname,
-                schemes=schemes,
-                is_primitive=False,
-                created=created,
-            )   
-            #add the linkingtable itself
-            _create_table_schema(
-                db_connector=db_connector,
-                data_model=create_model(
-                    objectname,
-                    **{attr.name: (attr.type_, ...)},
-                ),
-                table_name=link_table_name,
-                schemes=schemes,
-                is_primitive=False,
-                created=created,
-            ) 
-        #add referenced object 
-        elif is_obj:
-            _create_table_schema(
-                db_connector=db_connector,
-                data_model=attr.type_,
-                table_name=sub_table_name,
-                schemes=schemes,
-                parent=[table_name],
-                is_primitive=False,
-                created=created,
-            )
+        if is_obj:
+            continue
+
+        if is_multiple:
+            # ! Lets leave this one out for now
+            pass
+
         else:
             _populate_schema(attr=attr, schema=schema)
 
     pk_fun = partial(
         db_connector.__commands__.add_primary_key,
         table_name=table_name,
-        primary_key=f"{table_name}_id",
+        primary_key="id",
         dbconnector=db_connector,
     )
-    created.append(table_name)
-    if not is_linking:
-        schemes.insert(0,
-            {
-                "name": table_name,
-                "obj_name": data_model.__name__,
-                "schema": schema,
-                "pk_command": pk_fun,
-                "fk_commands": fk_commands,
-                "is_primitive": is_primitive,
-                "is_linking": is_linking,
-            }
-        )
-    else:
-        schemes.append(
-            {
-                "name": table_name,
-                "obj_name": data_model.__name__,
-                "schema": schema,
-                "pk_command": pk_fun,
-                "fk_commands": fk_commands,
-                "is_primitive": is_primitive,
-                "is_linking": is_linking,
-            }
-        )
 
-    return schemes
-
-
-def _handle_foreign_keys(
-    parent: str,
-    table_name: str,
-    db_connector: "DBConnector",
-    fk_commands: List,
-):
-    """Add a foreign key to the table schema and create a command to add the foreign key to the database.
-
-    Args:
-        parent (str): The name of the parent table.
-        table_name (str): The name of the table to add the foreign key to.
-        schema (Dict): The schema of the table.
-        db_connector (DBConnector): The database connector object.
-        fk_commands (List): The list of commands to add foreign keys to the database.
-
-    Returns:
-        None
-    """
-
-    if not parent:
-        return
-
-    kwargs = {
-        "table_name": table_name,
-        "foreign_key": f"{parent}_id",
-        "reference_table": parent,
-        "reference_column": f"{parent}_id",
-        "dbconnector": db_connector,
+    return {
+        "name": table_name,
+        "obj_name": data_model.__name__,
+        "schema": schema,
+        "pk_command": pk_fun,
     }
-
-    fk_commands.append(
-        partial(
-            db_connector.__commands__.add_foreign_key,
-            **kwargs,
-        )
-    )
 
 
 def _populate_schema(
