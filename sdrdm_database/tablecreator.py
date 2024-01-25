@@ -50,17 +50,21 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
     else:
         lib = DataModel.from_markdown(markdown_path)
 
-    ############################
-    # Hier werden die Relationen aus dem DataModel extrahiert
-    # und entsprechen der Namenskonvention die wir gewählt haben
-
     relations = extract_lib_relations(lib)
 
-    # Ich empfehle für das weitere Vorgehen, dass du über die Relationen
-    # iterierst und jeweils die Tabellen erstellst. Orientiere dich dabei
-    # an commands.py und füge evtl für MySQL sowie PostgreSQL die entsprechenden
-    # Befehle hinzu.
-    ############################
+    for table, fields in relations.items():
+        if isinstance(fields, dict):
+            names = []
+            types = []
+            for field, data in fields.items():
+                names.append(field)
+                type = data.get("type")
+                types.append(type)
+                #references = data.get('references')
+                #print(field,type, references)
+                #todo: create references
+        schema = ibis.schema(names=names, types= types)
+        db_connector.connection.create_table(table, schema=ibis.schema(names=names, types= types) )
 
     md_content = get_md_content(markdown_path)
     root_name = "DATA_MODEL"
@@ -71,20 +75,12 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
         obj_name=root_name,
     )
 
-    ############################
-    # Kannst du gerne löschen, dient nur zur Veranschaulichung der Relations
-
-    print(f"├── Extracted relations from data model {markdown_path}")
-    print(json.dumps(relations, indent=2), end="\n\n")
-
-    #############################
-
     # Create schemes for each object found within the data model
     instructions = []
     for obj in lib.__dict__.values():
         if not hasattr(obj, "__fields__"):
             continue
-
+       
         table_name = obj.__name__
         instructions.append(
             _create_table_schema(
@@ -251,12 +247,13 @@ def _create_table_schema(
 
         if attr.name == "id":
             continue
-        if is_obj:
+
+        if is_obj and not is_multiple:
             continue
 
         if is_multiple:
-            # ! Lets leave this one out for now
             pass
+            #schema[attr] = "string"
 
         else:
             _populate_schema(attr=attr, schema=schema)
