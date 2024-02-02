@@ -17,6 +17,9 @@ from sdrdm_database.modelutils import (
     get_md_content,
 )
 
+from sdrdm_database.commands import (
+    MySQLCommands
+)
 
 TYPE_MAPPING = {
     str: "string",
@@ -52,19 +55,28 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
 
     relations = extract_lib_relations(lib)
 
+    linkingconstraints = []
     for table, fields in relations.items():
         if isinstance(fields, dict):
+            constraint = {}
             names = []
             types = []
             for field, data in fields.items():
                 names.append(field)
-                type = data.get("type")
+                type = "varchar(36)"
                 types.append(type)
-                #references = data.get('references')
-                #print(field,type, references)
-                #todo: create references
+                references = data.get('references')
+                print(field,type, references)
+                
+                constraint["table"] = table
+                constraint["foreignkey"] = field
+                constraint["foreigntable"] = references.split("(")[0]
+                constraint["column"] = "id"
+                #print(constraint)
+                linkingconstraints.append(constraint)
         schema = ibis.schema(names=names, types= types)
-        db_connector.connection.create_table(table, schema=ibis.schema(names=names, types= types) )
+        db_connector.connection.create_table(table, schema=ibis.schema(names=names, types= types))
+        MySQLCommands.change_all_fields_to_varchar(table_name= table, dbconnector=db_connector)
 
     md_content = get_md_content(markdown_path)
     root_name = "DATA_MODEL"
@@ -105,6 +117,9 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
         table_name = instruction["name"]
         schema = ibis.schema(instruction["schema"])  # type: ignore
 
+        if table_name == "CarFactory":
+            continue
+
         if table_name in tables:
             print(f"├── Table '{table_name}'. Already exists in database. Skipping.")
             continue
@@ -122,6 +137,10 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
         command()
 
         print(f"├── Added primary key '{primary_key}' to table {table_name}")
+
+    for command in linkingconstraints:
+        MySQLCommands.add_foreign_key_constraint(dbconnector= db_connector, table_name= command["table"], foreign_key = command["foreignkey"], reference_table= command["foreigntable"],
+                                   reference_column= command["column"])
 
     db_connector._build_models()
 
