@@ -60,9 +60,9 @@ def _join_related_rows(
         ibis.Expr: The joined expression.
     """
 
-    for attr in model.__fields__.values():
-        is_obj = hasattr(attr.type_, "__fields__")
-        is_multiple = get_origin(attr.outer_type_) is list
+    for attr in model.model_fields.values():
+        is_obj = hasattr(attr.annotation, "model_fields")
+        is_multiple = get_origin(attr.annotation) is list
         rname = path + "_" + attr.name + "_" + "{name}"
 
         if not is_obj and not is_multiple:
@@ -89,7 +89,7 @@ def _join_related_rows(
 
         joined = _join_related_rows(
             table=to_join,
-            model=attr.type_,
+            model=attr.annotation,
             joined=joined,
             predicate=f"{model.__name__}_{attr.name}_id",
             db=db,

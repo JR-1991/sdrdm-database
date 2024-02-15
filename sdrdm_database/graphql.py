@@ -81,7 +81,7 @@ def _convert_model(model, registered_models={}):
         strawberry.type: The converted Strawberry type.
     """
     to_model = {}
-    for attr in model.__fields__.values():
+    for attr in model.model_fields.values():
         dtype = _prepare_dtype(attr, registered_models)
         to_model[attr.name] = (dtype, ...)
 
@@ -95,18 +95,18 @@ def _prepare_dtype(
     attr,
     registered_models,
 ):
-    is_multiple = get_origin(attr.outer_type_) is list
-    is_obj = hasattr(attr.type_, "__fields__")
-    dtype = attr.type_
+    is_multiple = get_origin(attr.annotation) is list
+    is_obj = hasattr(attr.annotation, "model_fields")
+    dtype = attr.annotation
 
-    if get_args(attr.type_):
+    if get_args(attr.annotation):
         dtype = _deconstruct_union_type(dtype)
-    elif issubclass(attr.type_, Enum):
+    elif issubclass(attr.annotation, Enum):
         dtype = str
 
     if is_obj and not dtype.__name__ in registered_models:
         dtype = _convert_model(
-            attr.type_,
+            attr.annotation,
             registered_models,
         )
     elif is_obj and dtype.__name__ in registered_models:

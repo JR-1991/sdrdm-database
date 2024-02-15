@@ -18,7 +18,7 @@ def test_commands():
         dbtype="mysql",
     )
 
-    assert db.__commands__ == MySQLCommands, "Wrong commands class"
+    assert db._commands == MySQLCommands, "Wrong commands class"
 
     # Postgres case
     db = DBConnector(
@@ -30,4 +30,4 @@ def test_commands():
         dbtype="postgres",
     )
 
-    assert db.__commands__ == PostgresCommands, "Wrong commands class"
+    assert db._commands == PostgresCommands, "Wrong commands class"

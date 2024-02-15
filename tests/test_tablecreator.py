@@ -45,8 +45,8 @@ def test_populate_schema():
 
     schema = {}
 
-    foo = MockDataModel.__fields__["foo"]
-    bar = MockDataModel.__fields__["bar"]
+    foo = MockDataModel.model_fields["foo"]
+    bar = MockDataModel.model_fields["bar"]
 
     _populate_schema(attr=foo, schema=schema)
     _populate_schema(attr=bar, schema=schema)
@@ -84,7 +84,7 @@ def test_handle_foreign_keys():
     }
 
     assert fk_commands[0].keywords == expected_kwargs
-    assert fk_commands[0].func == db_connector.__commands__.add_foreign_key
+    assert fk_commands[0].func == db_connector._commands.add_foreign_key
 
 
 def test_create_table_schema():
@@ -110,7 +110,7 @@ def test_create_table_schema():
 
     pk_command = result[0].pop("pk_command")
     expected_pk = partial(
-        db_connector.__commands__.add_primary_key,
+        db_connector._commands.add_primary_key,
         table_name=table_name,
         primary_key=f"{table_name}_id",
         dbconnector=db_connector,

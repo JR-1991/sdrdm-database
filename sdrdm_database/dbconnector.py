@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 import ibis
 from ibis.backends.base.sql.alchemy import BaseAlchemyBackend
 from ibis.expr.types.relations import Table
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from sdrdm_database import commands
 from sdrdm_database.dataio import _extract_related_rows, insert_into_database
@@ -56,9 +56,10 @@ class DBConnector(BaseModel):
 
     """
 
-    class Config:
-        arbitrary_types_allowed = True
-        use_enum_values = True
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_enum_values=True,
+    )
 
     db_name: str
     address: Optional[str] = None
@@ -70,8 +71,8 @@ class DBConnector(BaseModel):
     dbtype: SupportedBackends = SupportedBackends.MYSQL
     connection: Optional[BaseAlchemyBackend] = None
 
-    __models__: Dict[str, Any] = PrivateAttr({})
-    __commands__: Optional[commands.MetaCommands] = PrivateAttr(None)
+    _models: Dict[str, Any] = PrivateAttr({})
+    _commands: Optional[commands.MetaCommands] = PrivateAttr(None)
 
     def __init__(self, **data) -> None:
         super().__init__(**data)
@@ -85,7 +86,7 @@ class DBConnector(BaseModel):
                     f"Supported types are: {SupportedBackends}"
                 )
 
-        self.__commands__ = self._get_commands()
+        self._commands = self._get_commands()
 
         if os.environ.get("TESTING_STAGE") == "unit_tests":
             return
@@ -160,8 +161,8 @@ class DBConnector(BaseModel):
         for sub_name, row in sub_models.iterrows():
             name = sub_name.split("_", 1)[-1]
 
-            self.__models__[sub_name] = getattr(root_libs[row.part_of], row.obj_name)
-            self.__models__[name] = getattr(root_libs[row.part_of], row.obj_name)
+            self._models[sub_name] = getattr(root_libs[row.part_of], row.obj_name)
+            self._models[name] = getattr(root_libs[row.part_of], row.obj_name)
 
     def _connect_duckdb(self):
         if self.address is None and self.dbtype == SupportedBackends.DUCKDB:
@@ -318,7 +319,7 @@ class DBConnector(BaseModel):
             self.connection.table("__model_meta__").to_pandas().set_index("table")
         )
 
-        if name not in self.__models__:
+        if name not in self._models:
             raise ValueError(f"Requested model '{name}' is not registered.")
 
-        return self.__models__[name]
+        return self._models[name]

@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, get_origin
+from typing import Any, Callable, Dict, List, Optional, Tuple, get_args, get_origin
 from typing import get_origin
 from joblib import Parallel, delayed
 import pandas as pd
@@ -30,9 +30,9 @@ def insert_into_database(
     post_insert = []
 
     for key, value in dataset:
-        field_info = dataset.__fields__[key]
-        is_mutliple = get_origin(field_info.outer_type_) is list
-        is_obj = hasattr(field_info.type_, "__fields__")
+        field_info = dataset.model_fields[key]
+        is_mutliple = get_origin(field_info.annotation) is list
+        is_obj = hasattr(get_args(field_info.annotation)[0], "model_fields")
         sub_key = f"{dataset.__class__.__name__}_{key}"
 
         if is_obj:
@@ -153,18 +153,18 @@ def _extract_related_rows(
     else:
         rows = table.execute().iloc[0:MAX_ROWS]
 
-    subset = list(model.__fields__.keys())
+    subset = list(model.model_fields.keys())
     subset.remove("id")
 
     # Find out, which attributes are objects
     obj_subset = [
         (
-            attr.type_,
+            attr.annotation,
             attr.name,
-            get_origin(attr.outer_type_) == list,
+            get_origin(attr.annotation) == list,
         )
-        for attr in model.__fields__.values()
-        if hasattr(attr.type_, "__fields__") or get_origin(attr.outer_type_) == list
+        for attr in model.model_fields.values()
+        if hasattr(attr.annotation, "model_fields") or get_origin(attr.annotation) == list
     ]
 
     if db.dbtype.value == "mysql":
@@ -234,7 +234,7 @@ def _process_row(
     ) in obj_subset:
         sub_table_name = f"{model.__name__}_{name}"
         sub_table = db.connection.table(sub_table_name)
-        is_obj = hasattr(sub_model, "__fields__")
+        is_obj = hasattr(sub_model, "model_fields")
 
         if is_multi and not is_obj:
             filtered = sub_table[sub_table[id_col] == row[id_col]]

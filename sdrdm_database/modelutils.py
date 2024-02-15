@@ -2,11 +2,11 @@ import glob
 import os
 import tempfile
 from io import StringIO
-from typing import Dict
+from typing import Dict, Tuple, get_args
 import git
 
 from pydantic.fields import FieldInfo
-from sdRDM import DataModel
+from sdRDM.generator.utils import extract_modules
 from sdRDM.generator.codegen import generate_api_from_parser
 from sdRDM.markdown.markdownparser import MarkdownParser
 from sdRDM.tools.gitutils import _import_library
@@ -24,7 +24,7 @@ def convert_md_to_json(
     Returns:
         dict: A JSON string representing the markdown file.
     """
-    return MarkdownParser.parse(StringIO(md_content)).json(indent=2)
+    return MarkdownParser.parse(StringIO(md_content)).model_dump_json(indent=2)
 
 
 def rebuild_api(
@@ -52,7 +52,7 @@ def rebuild_api(
 
         api_loc = os.path.join(tmpdir, libname)
 
-        return DataModel._extract_modules(
+        return extract_modules(
             _import_library(api_loc, libname),
             links={},
         )
@@ -70,7 +70,7 @@ def extract_lib_relations(lib):
     """
     relations = {}
     for obj in lib.__dict__.values():
-        if not hasattr(obj, "__fields__"):
+        if not hasattr(obj, "model_fields"):
             continue
 
         relations.update(get_relations(obj))
@@ -89,11 +89,15 @@ def get_relations(obj):
         dict: A dictionary containing the relations of the object.
     """
     relations = {}
-    for field in obj.__fields__.values():
-        if not hasattr(field.type_, "__fields__"):
+    for name, field in obj.model_fields.items():
+        args = get_args(field.annotation)
+        has_object = any(hasattr(arg, "model_fields") for arg in args)
+
+        if not has_object:
             continue
 
-        relation_name = f"{obj.__name__}_{field.name}_{field.type_.__name__}"
+        dtype = _get_annotation_object(field.annotation)
+        relation_name = f"{obj.__name__}_{name}_{dtype.__name__}"
         relations[relation_name] = _get_attribute_relation(field, obj.__name__)
 
     return relations
@@ -102,7 +106,7 @@ def get_relations(obj):
 def _get_attribute_relation(
     field: FieldInfo,
     obj_name: str,
-) -> Dict:
+) -> Tuple[Dict, Dict]:
     """
     Returns a dictionary representing the attribute relation for a given field and object name.
 
@@ -111,18 +115,55 @@ def _get_attribute_relation(
         obj_name (str): The name of the object.
 
     Returns:
-        Dict: A dictionary representing the attribute relation.
+        Tuple[Dict, Dict]: A tuple containing two dictionaries representing the attribute relations.
+        The first dictionary represents the attribute relation for the object name, with the following keys:
+            - "column": The column name representing the object ID.
+            - "references": A set containing the object name.
+        The second dictionary represents the attribute relation for the field type, with the following keys:
+            - "column": The column name representing the field type ID.
+            - "references": A set containing the field type name.
     """
-    return {
-        f"{obj_name}_id": {
-            "type": "VARCHAR(100)",
-            "references": f"{obj_name}(id)",
+
+    target = _get_annotation_object(field.annotation)
+
+    return (
+        {
+            "column": f"{obj_name}_id",
+            "references": obj_name,
         },
-        f"{field.type_.__name__}_id": {
-            "type": "VARCHAR(100)",
-            "references": f"{field.type_.__name__}(id)",
+        {
+            "column": f"{target.__name__}_id",
+            "references": target.__name__,
         },
-    }
+    )
+
+
+def _get_annotation_object(annotation):
+    """
+    Returns the object from the given annotation.
+
+    Args:
+        annotation: The annotation object.
+
+    Returns:
+        The object from the annotation.
+
+    Raises:
+        ValueError: If no object is found in the annotation.
+    """
+    args = get_args(annotation)
+
+    if len(args) == 1:
+        return args[0]
+    elif len(args) > 1:
+        return next(
+            filter(
+                lambda arg: hasattr(arg, "model_fields"),
+                args,
+            )
+        )
+    else:
+        raise ValueError("No object found in annotation")
 
 
 def get_md_content(markdown_path: str) -> str:
