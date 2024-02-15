@@ -1,5 +1,4 @@
 from enum import Enum
-import json
 import ibis
 import numpy
 import validators
@@ -15,10 +14,6 @@ from sdrdm_database.modelutils import (
     convert_md_to_json,
     extract_lib_relations,
     get_md_content,
-)
-
-from sdrdm_database.commands import (
-    MySQLCommands
 )
 
 TYPE_MAPPING = {
@@ -53,31 +48,6 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
     else:
         lib = DataModel.from_markdown(markdown_path)
 
-    relations = extract_lib_relations(lib)
-
-    linkingconstraints = []
-    for table, fields in relations.items():
-        if isinstance(fields, dict):
-            constraint = {}
-            names = []
-            types = []
-            for field, data in fields.items():
-                names.append(field)
-                type = "varchar(36)"
-                types.append(type)
-                references = data.get('references')
-                print(field,type, references)
-                
-                constraint["table"] = table
-                constraint["foreignkey"] = field
-                constraint["foreigntable"] = references.split("(")[0]
-                constraint["column"] = "id"
-                #print(constraint)
-                linkingconstraints.append(constraint)
-        schema = ibis.schema(names=names, types= types)
-        db_connector.connection.create_table(table, schema=ibis.schema(names=names, types= types))
-        MySQLCommands.change_all_fields_to_varchar(table_name= table, dbconnector=db_connector)
-
     md_content = get_md_content(markdown_path)
     root_name = "DATA_MODEL"
     _add_to_model_table(
@@ -90,9 +60,9 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
     # Create schemes for each object found within the data model
     instructions = []
     for obj in lib.__dict__.values():
-        if not hasattr(obj, "__fields__"):
+        if not hasattr(obj, "model_fields"):
             continue
-       
+
         table_name = obj.__name__
         instructions.append(
             _create_table_schema(
@@ -117,9 +87,6 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
         table_name = instruction["name"]
         schema = ibis.schema(instruction["schema"])  # type: ignore
 
-        if table_name == "CarFactory":
-            continue
-
         if table_name in tables:
             print(f"├── Table '{table_name}'. Already exists in database. Skipping.")
             continue
@@ -138,9 +105,25 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
 
         print(f"├── Added primary key '{primary_key}' to table {table_name}")
 
-    for command in linkingconstraints:
-        MySQLCommands.add_foreign_key_constraint(dbconnector= db_connector, table_name= command["table"], foreign_key = command["foreignkey"], reference_table= command["foreigntable"],
-                                   reference_column= command["column"])
+    relations = extract_lib_relations(lib)
+
+    for table_name, relation in relations.items():
+        source, target = relation
+
+        if table_name in tables:
+            print(
+                f"├── Join table '{table_name}'. Already exists in database. Skipping."
+            )
+            continue
+
+        db_connector._commands.create_join_table(
+            table_name=table_name,
+            table1=source["references"],
+            table2=target["references"],
+            dbconnector=db_connector,
+        )
+
+        print(f"├── Added join table '{table_name}'")
 
     db_connector._build_models()
 
@@ -260,11 +243,11 @@ def _create_table_schema(
 
     schema = {}
 
-    for attr in data_model.__fields__.values():
-        is_obj = hasattr(attr.type_, "__fields__")
-        is_multiple = get_origin(attr.outer_type_) is list
+    for name, attr in data_model.model_fields.items():
+        is_obj = hasattr(attr.annotation, "model_fields")
+        is_multiple = get_origin(attr.annotation) is list
 
-        if attr.name == "id":
+        if name == "id":
             continue
 
         if is_obj and not is_multiple:
@@ -272,13 +255,13 @@ def _create_table_schema(
 
         if is_multiple:
             pass
-            #schema[attr] = "string"
+            # schema[attr] = "string"
 
         else:
             _populate_schema(attr=attr, schema=schema)
 
     pk_fun = partial(
-        db_connector.__commands__.add_primary_key,
+        db_connector._commands.add_primary_key,
         table_name=table_name,
         primary_key="id",
         dbconnector=db_connector,
@@ -308,10 +291,11 @@ def _populate_schema(
     Returns:
         None
     """
-    name = attr.name
-    is_required = bool(attr.required)
+
+    name = attr.path
+    is_required = attr.is_required()
     schema[name] = _map_type(
-        attr.type_,
+        attr.annotation,
         is_required,
     )
 
@@ -362,7 +346,7 @@ def _deconstruct_union_type(dtype):
     types = [
         dt
         for dt in get_args(dtype)
-        if not hasattr(dt, "__fields__") and not dt == type(None)
+        if not hasattr(dt, "model_fields") and not dt == type(None)
     ]
 
     if len(types) > 1:
