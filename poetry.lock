@@ -343,6 +343,22 @@ jupyter = ["ipython (>=7.8.0)", "tokenize-rt (>=3.2.0)"]
 uvloop = ["uvloop (>=0.15.2)"]
 
 [[package]]
+name = "bigtree"
+version = "0.14.3"
+description = "Tree Implementation and Methods for Python, integrated with Python list, dictionary, and pandas DataFrame."
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "bigtree-0.14.3-py3-none-any.whl", hash = "sha256:d1ac8435337b670acefe120ea7329ea59eac74fe3e8b2e47ebffa44ac431356b"},
+    {file = "bigtree-0.14.3.tar.gz", hash = "sha256:c4b32ce11e2034c821204b5630788e64a590e1adb007bbaca9dce57c781291a4"},
+]
+
+[package.extras]
+all = ["pandas", "pillow", "pydot"]
+image = ["pillow", "pydot"]
+pandas = ["pandas"]
+
+[[package]]
 name = "cachetools"
 version = "5.3.2"
 description = "Extensible memoizing collections and decorators"
@@ -2834,4 +2850,4 @@ postgres = []
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "0bae3ec8e7412192b3d0f41b9fffb8c0601289c27bddbee2395808cddc47b4fa"
+content-hash = "3e0132b8434fb2157db2c416929b9d2f5766d84840352fa5441e30ca4147a4af"

@@ -1,8 +1,10 @@
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, get_args, get_origin
+from typing import Any, Dict, List, get_origin
 from typing import get_origin
-from joblib import Parallel, delayed
-import pandas as pd
+from sqlalchemy.orm import Session
+from bigtree import levelordergroup_iter
+
+from sdrdm_database.treeutils import _prune_by_criteria
 
 
 def insert_into_database(
@@ -26,13 +28,13 @@ def insert_into_database(
         table_name = dataset.__class__.__name__
 
     sub_objects = {}
-    to_exclude = set()
+    to_exclude = set(["id"])
     post_insert = []
 
     for key, value in dataset:
-        field_info = dataset.model_fields[key]
-        is_mutliple = get_origin(field_info.annotation) is list
-        is_obj = hasattr(get_args(field_info.annotation)[0], "model_fields")
+        field_info = dataset.__fields__[key]
+        is_mutliple = get_origin(field_info.outer_type_) is list
+        is_obj = hasattr(field_info.type_, "__fields__")
         sub_key = f"{dataset.__class__.__name__}_{key}"
 
         if is_obj:
@@ -51,7 +53,14 @@ def insert_into_database(
             post_insert.append(partial(_insert_primitive_array, **kwargs))
             to_exclude.add(key)
 
-    to_insert = dataset.dict(exclude=to_exclude)
+    to_insert = {
+        **dataset.dict(exclude=to_exclude),
+        f"{table_name}_id": str(dataset.__id__),
+    }
+
+    if parent_id is not None:
+        assert parent_col is not None, "Parent column must be specified"
+        to_insert[f"{parent_col}_id"] = parent_id
 
     db.connection.insert(table_name, to_insert)
 
@@ -122,140 +131,213 @@ def _insert_primitive_array(
         db.connection.insert(table, to_insert)
 
 
-def _extract_related_rows(
-    table,
-    id_col: str,
+def _retrieve_documents(
     db: "DBConnector",
-    model: "DataModel",
-    query_fun: Optional[Callable] = None,
-    n_jobs: int = -1,
-    MAX_ROWS: int = 20,
-) -> List[Tuple[int, Dict[str, Any]]]:
-    """Extracts related rows from a database table.
+    table_name: str,
+    criteria: Dict[str, Dict[str, Any]] = None,
+):
+    """Retrieves all documents from a given table in the database.
 
     Args:
-        table: The database table to extract rows from.
-        id_col: The name of the column containing the row IDs.
-        db: The database connection object.
-        model: The Pydantic model representing the table schema.
-        query_fun: Optional function to filter rows before extraction.
-        n_jobs: Number of parallel jobs to use for extraction.
-        MAX_ROWS: Maximum number of rows to extract.
+        db (DBConnector): A DBConnector object representing the database.
+        table_name (str): The name of the table to retrieve documents from.
 
     Returns:
-        A list of tuples, where each tuple contains the row ID and a dictionary
-        of the row's attribute values.
+        list: A list of documents retrieved from the table.
     """
+    assert (
+        db.__class__.__name__ == "DBConnector"
+    ), "Database must be a DBConnector object"
+    assert table_name in db.__models__, "Table has no associated model"
+    assert db.engine, "Database engine must be set"
+    assert db.__sqlalchemy_classes__, "SQLAlchemy classes must be set"
 
-    # Extract data
-    if query_fun:
-        rows = table[query_fun(table)].execute()
-    else:
-        rows = table.execute().iloc[0:MAX_ROWS]
+    with Session(db.engine) as session:
+        model = db.get_table_api(table_name)
 
-    subset = list(model.model_fields.keys())
-    subset.remove("id")
-
-    # Find out, which attributes are objects
-    obj_subset = [
-        (
-            attr.annotation,
-            attr.name,
-            get_origin(attr.annotation) == list,
-        )
-        for attr in model.model_fields.values()
-        if hasattr(attr.annotation, "model_fields") or get_origin(attr.annotation) == list
-    ]
-
-    if db.dbtype.value == "mysql":
-        data = []
-        for _, row in rows.iterrows():
-            data.append(
-                _process_row(
-                    row=row,
-                    subset=subset,
-                    obj_subset=obj_subset,
-                    id_col=id_col,
-                    model=model,
-                    db=db,
-                )
+        if criteria is None:
+            results = _query_all(
+                db=db,
+                target_table=table_name,
+                session=session,
+            )
+        else:
+            _validate_criteria(db, criteria)
+            results = _query_by_criteria(
+                db=db,
+                target_table=table_name,
+                session=session,
+                criteria=criteria,
             )
 
-        return data
-
-    return Parallel(n_jobs=n_jobs, backend="threading")(
-        delayed(_process_row)(
-            row=row,
-            subset=subset,
-            obj_subset=obj_subset,
-            id_col=id_col,
-            model=model,
-            db=db,
-        )
-        for _, row in rows.iterrows()
-    )
+        return [model(**_extract_document(obj)) for obj in results]
 
 
-def _process_row(
-    row,
-    subset,
-    obj_subset,
-    id_col,
-    model,
-    db,
+def _query_all(
+    db: "DBConnector",
+    target_table: str,
+    session,
+):
+    """Returns all objects of a given automapped class from a DB."""
+    automap_cls = getattr(db.__sqlalchemy_classes__, target_table)
+    return session.query(automap_cls).all()
+
+
+def _query_by_criteria(
+    db: "DBConnector",
+    target_table: str,
+    session,
+    criteria: Dict[str, Dict[str, str]],
 ):
     """
-    Processes a single row of data from a database table.
+    Queries the database for rows in the target table that match the given criteria.
 
     Args:
-        row (pandas.Series): A single row of data from a database table.
-        subset (List[str]): A list of column names to include in the processed data.
-        obj_subset (List[Tuple[type, str, bool]]): A list of tuples representing related objects to include in the processed data. Each tuple contains:
-            - A reference to the related object's model class
-            - The name of the related object's attribute in the processed data
-            - A boolean indicating whether the related object is a single object or a list of objects
-        id_col (str): The name of the column containing the primary key ID for the table.
-        model (type): The model class for the table being processed.
-        db (Database): The database object containing the table being processed.
+        db: A `DBConnector` instance representing the database to query.
+        target_table: A string representing the name of the table to query.
+        criteria: A dictionary representing the criteria to filter the query by.
 
     Returns:
-        dict: A dictionary containing the processed data for the input row, including related objects as specified in obj_subset.
+        A list of rows from the target table that match the given criteria.
     """
 
-    subset = [col for col in subset if col in row]
-    row = row.where(pd.notnull(row), None)
-    dataset = row[subset].to_dict()
-    dataset["id"] = row[id_col]
+    root_cls = getattr(db.__sqlalchemy_classes__, target_table)
+    tree = db.__relationships__[target_table]
 
-    for (
-        sub_model,
-        name,
-        is_multi,
-    ) in obj_subset:
-        sub_table_name = f"{model.__name__}_{name}"
-        sub_table = db.connection.table(sub_table_name)
-        is_obj = hasattr(sub_model, "model_fields")
+    # Retrieve a tree with only the tables that are relevant to the query
+    to_join = _prune_by_criteria(tree, criteria)
+    query = session.query(root_cls)
 
-        if is_multi and not is_obj:
-            filtered = sub_table[sub_table[id_col] == row[id_col]]
-            dataset[name] = filtered[name].execute().values.tolist()
+    # Join the tables in the tree
+    for group in levelordergroup_iter(to_join):
+        for node in group:
+            if node.name == target_table:
+                continue
+
+            automap_cls = getattr(db.__sqlalchemy_classes__, node.name)
+            query = query.join(automap_cls)
+
+    # Filter the query by the criteria
+    for table, attributes in criteria.items():
+        automap_cls = getattr(db.__sqlalchemy_classes__, table)
+
+        for attr, value in attributes.items():
+            assert hasattr(
+                automap_cls, attr
+            ), f"{table} does not have attribute '{attr}'"
+
+            get = getattr(automap_cls, attr) == value
+            query = query.filter(get)
+
+    return query.all()
+
+
+def _validate_criteria(
+    db: "DBConnector",
+    criteria: Dict[str, Dict[str, Any]],
+):
+    """Checks whether given tables are existent in the database."""
+    tables = db.connection.list_tables()
+    for table in criteria.keys():
+        assert table in tables, f"Table '{table}' does not exist in the database"
+
+
+def _extract_document(obj):
+    """
+    Extracts a dictionary representation of an automapped object and its children.
+
+    Args:
+        obj: An automapped object.
+
+    Returns:
+        A dictionary representation of the object and its children.
+    """
+
+    assert _is_automap(obj), "Object must be an automapped object"
+
+    collections = _get_collections(obj)
+    multi_names = _extract_attr_names(collections)
+    table_name = _get_table_name(obj)
+    foreign_keys = _get_foreign_keys(obj)
+    forbidden_keys = foreign_keys + collections
+
+    dataset = {
+        key.replace(table_name + "_", "", 1): value
+        for key, value in obj.__dict__.items()
+        if key not in forbidden_keys and not key.startswith("_")
+    }
+
+    for collection, multi_name in zip(collections, multi_names):
+        collection = getattr(obj, collection)
+
+        if collection == []:
             continue
 
-        res = _extract_related_rows(
-            table=sub_table,
-            id_col=f"{sub_table_name}_id",
-            query_fun=lambda table: table[id_col] == row[id_col],
-            db=db,
-            model=sub_model,
-            n_jobs=1,
-        )
-
-        if not res:
-            continue
-
-        if is_multi:
-            dataset[name] = res
-        else:
-            dataset[name] = res[0]
+        dataset[multi_name] = [_extract_document(child) for child in collection]
 
     return dataset
+
+
+def _is_automap(obj):
+    """
+    Checks if an object is an automapped object.
+
+    Args:
+        obj: An object.
+
+    Returns:
+        True if the object is an automapped object, False otherwise.
+    """
+    return obj.__module__ == "sqlalchemy.ext.automap"
+
+
+def _get_collections(obj):
+    """
+    Gets a list of collections in an automapped object.
+
+    Args:
+        obj: An automapped object.
+
+    Returns:
+        A list of collections in the automapped object.
+    """
+    return [attr for attr in obj.__dir__() if attr.endswith("_collection")]
+
+
+def _extract_attr_names(collections):
+    """
+    Extracts attribute names from a list of collections.
+
+    Args:
+        collections: A list of collections.
+
+    Returns:
+        A list of attribute names extracted from the collections.
+    """
+    return [attr.split("_", 1)[-1].split("_collection", -1)[0] for attr in collections]
+
+
+def _get_table_name(obj):
+    """
+    Gets the name of the table associated with an automapped object.
+
+    Args:
+        obj: An automapped object.
+
+    Returns:
+        The name of the table associated with the automapped object.
+    """
+    return obj.__class__.__table__.name
+
+
+def _get_foreign_keys(obj):
+    """
+    Gets a list of foreign keys associated with an automapped object.
+
+    Args:
+        obj: An automapped object.
+
+    Returns:
+        A list of foreign keys associated with the automapped object.
+    """
+    return [key.column.name for key in obj.__class__.__table__.foreign_keys]
