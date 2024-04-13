@@ -6,6 +6,7 @@ from typing import Dict, Tuple, get_args
 import git
 
 from pydantic.fields import FieldInfo
+from sdRDM.base.tree import get_origin
 from sdRDM.generator.utils import extract_modules
 from sdRDM.generator.codegen import generate_api_from_parser
 from sdRDM.markdown.markdownparser import MarkdownParser
@@ -48,6 +49,7 @@ def rebuild_api(
             parser=parser,
             dirpath=tmpdir,
             libname=libname,
+            json_schemes=False,
         )
 
         api_loc = os.path.join(tmpdir, libname)
@@ -91,6 +93,7 @@ def get_relations(obj):
     relations = {}
     for name, field in obj.model_fields.items():
         args = get_args(field.annotation)
+        is_list = get_origin(field.annotation) == list
         has_object = any(hasattr(arg, "model_fields") for arg in args)
 
         if not has_object:
@@ -98,7 +101,11 @@ def get_relations(obj):
 
         dtype = _get_annotation_object(field.annotation)
         relation_name = f"{obj.__name__}_{name}_{dtype.__name__}"
-        relations[relation_name] = _get_attribute_relation(field, obj.__name__)
+        relations[relation_name] = _get_attribute_relation(
+            field=field,
+            obj_name=obj.__name__,
+            is_list=is_list,
+        )
 
     return relations
 
@@ -106,6 +113,7 @@ def get_relations(obj):
 def _get_attribute_relation(
     field: FieldInfo,
     obj_name: str,
+    is_list: bool,
 ) -> Tuple[Dict, Dict]:
     """
     Returns a dictionary representing the attribute relation for a given field and object name.
@@ -130,10 +138,14 @@ def _get_attribute_relation(
         {
             "column": f"{obj_name}_id",
             "references": obj_name,
+            "is_target": False,
+            "is_list": is_list,
         },
         {
             "column": f"{target.__name__}_id",
             "references": target.__name__,
+            "is_target": True,
+            "is_list": is_list,
         },
     )
 
