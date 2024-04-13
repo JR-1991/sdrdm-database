@@ -8,7 +8,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.9"
-ibis-framework = { extras = ["mysql"], version = "^7.0.0" }
+ibis-framework = { extras = ["mysql"], version = "^8.0.0" }
 validators = "^0.22.0"
 strawberry-graphql = "^0.209.8"
 typer = "^0.9.0"
