@@ -50,6 +50,8 @@ def test_mysql():
         [
             "Test",
             "Test_nested_Nested",
+            "Nested",
+            "AnotherNested",
             "__model_meta__",
         ]
     )
