@@ -43,20 +43,17 @@ def test_mysql():
 
     # Load model
     lib = DataModel.from_markdown("./.github/integration/model.md")
-    db.create_tables(
-        model="Test",
-        markdown_path="./.github/integration/model.md",
-    )
+    db.create_tables(markdown_path="./.github/integration/model.md")
 
     # Check tables
     expected_tables = set(
         [
             "Test",
-            "Test_nested",
-            "Test_multiple_values",
+            "Test_nested_Nested",
             "__model_meta__",
         ]
     )
+
     assert (
         set(db.connection.list_tables()) == expected_tables
     ), f"Expected tables '{expected_tables}' but got '{db.connection.list_tables()}'"
@@ -69,7 +66,7 @@ def test_mysql():
     }
 
     expected = {
-        "Test_id": "!string",
+        "id": "!string",
         "name": "string",
         "int_value": "int64",
         "float_value": "float64",
@@ -89,24 +86,17 @@ def test_mysql():
         float_value=1.0,
         bool_value=True,
         name="Hello",
-        multiple_values=[1, 2, 3],
     )
 
     obj.add_to_nested(name="Hello")
 
     db.insert(obj)
 
-    expected = {**obj.dict(exclude_unset=True), "Test_id": str(obj.__id__)}
-    del expected["multiple_values"]
-
-    entry = db.connection.table("Test").execute().loc[0].to_dict()
+    expected = {**obj.dict(exclude_unset=True), "id": str(obj._id)}
+    table = db.connection.table("Test").execute()
+    entry = table[table.id == str(obj._id)].iloc[0].to_dict()
 
     assert entry == expected, f"Expected entry '{expected}' but got '{entry}'"
-
-    # Check if the primitive list table is populated
-    assert (
-        db.connection.table("Test_multiple_values").count().execute() == 3
-    ), "Wrong count for primitive list table"
 
     # Retrieve the object again
     retrieved = db.get("Test")[0]
@@ -117,7 +107,7 @@ def test_mysql():
         },
     }
 
-    expected = sort_subkeys(obj.dict(exclude=to_exclude))
-    retrieved = sort_subkeys(retrieved.dict(exclude=to_exclude))
+    expected = obj.dict(exclude=to_exclude)
+    retrieved = retrieved.dict(exclude=to_exclude)
 
     assert expected == retrieved, f"Expected object '{obj}' but got '{retrieved}'"

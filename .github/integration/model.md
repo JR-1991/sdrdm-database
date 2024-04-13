@@ -1,6 +1,6 @@
 # Model
 
-Description 
+Description
 
 ## Objects
 
@@ -19,15 +19,19 @@ Description
   - Type: bool
   - Description: Boolean value
 - nested
-  - Type: Nested
+  - Type: Nested[]
   - Description: Nested object
-  - Multiple: True
-- multiple_values
-  - Type: integer
-  - Description: Multiple values
-  - Multiple: True
 
 ### Nested
+
+- name
+  - Type: string
+  - Description: Name of the database
+- another_nested
+  - Type: AnotherNested
+  - Description: Thats just another one
+
+### AnotherNested
 
 - name
   - Type: string
