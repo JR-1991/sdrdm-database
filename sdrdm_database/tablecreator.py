@@ -1,6 +1,8 @@
 from enum import Enum
 import ibis
 import numpy
+import asyncio
+from pydantic.fields import FieldInfo
 import validators
 
 from sdRDM import DataModel
@@ -64,13 +66,16 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
             continue
 
         table_name = obj.__name__
-        instructions.append(
+
+        table = asyncio.run(
             _create_table_schema(
                 db_connector=db_connector,
                 data_model=obj,
                 table_name=table_name,
             )
         )
+
+        instructions.append(table)
 
         _add_to_model_table(
             table_name=table_name,
@@ -82,6 +87,8 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
 
     tables = db_connector.connection.list_tables()
     pk_commands = []
+
+    # TODO - Refactor this to functions
 
     for instruction in instructions:
         table_name = instruction["name"]
@@ -110,20 +117,35 @@ def create_tables(db_connector: "DBConnector", markdown_path: str):
     for table_name, relation in relations.items():
         source, target = relation
 
-        if table_name in tables:
-            print(
-                f"├── Join table '{table_name}'. Already exists in database. Skipping."
+
+        if source["is_list"] and target["is_list"]:
+
+            if table_name in tables:
+                print(
+                    f"├── Join table '{table_name}'. Already exists in database. Skipping."
+                )
+                continue
+
+            db_connector._commands.create_join_table(
+                table_name=table_name,
+                table1=source["references"],
+                table2=target["references"],
+                dbconnector=db_connector,
             )
-            continue
 
-        db_connector._commands.create_join_table(
-            table_name=table_name,
-            table1=source["references"],
-            table2=target["references"],
-            dbconnector=db_connector,
-        )
+            print(f"├── Added join table '{table_name}'")
+        else:
+            table_name, *attr, reference_table = table_name.split("_")
+            foreign_key=f"{'_'.join(attr)}__fk"
+            db_connector._commands.add_foreign_key(
+                table_name=table_name,
+                foreign_key=foreign_key,
+                reference_table=reference_table,
+                reference_column="id",
+                dbconnector=db_connector,
+            )
 
-        print(f"├── Added join table '{table_name}'")
+            print(f"├── Added foreign key '{foreign_key}' to table '{table_name}'")
 
     db_connector._build_models()
 
@@ -223,7 +245,7 @@ def _create_model_meta_table(db_connector: "DBConnector"):
         )
 
 
-def _create_table_schema(
+async def _create_table_schema(
     db_connector: "DBConnector",
     data_model: "DataModel",
     table_name: str,
@@ -234,31 +256,22 @@ def _create_table_schema(
         db_connector (DBConnector): A database connector object.
         obj (DataModel): A DataModel object.
         table_name (str): The name of the table to create.
-        schemes (List[Dict]): A list of table schema dictionaries.
-        parent (Optional[str], optional): The name of the parent table. Defaults to None.
 
     Returns:
         List[Dict]: A list of table schema dictionaries.
     """
 
     schema = {}
+    tasks = [
+        _populate_schema(
+            name=name,
+            field_info=field_info,
+            schema=schema
+        )
+        for name, field_info in data_model.model_fields.items()
+    ]
 
-    for name, attr in data_model.model_fields.items():
-        is_obj = hasattr(attr.annotation, "model_fields")
-        is_multiple = get_origin(attr.annotation) is list
-
-        if name == "id":
-            continue
-
-        if is_obj and not is_multiple:
-            continue
-
-        if is_multiple:
-            pass
-            # schema[attr] = "string"
-
-        else:
-            _populate_schema(attr=attr, schema=schema)
+    await asyncio.gather(*tasks)
 
     pk_fun = partial(
         db_connector._commands.add_primary_key,
@@ -274,10 +287,10 @@ def _create_table_schema(
         "pk_command": pk_fun,
     }
 
-
-def _populate_schema(
-    attr,
-    schema: Dict,
+async def _populate_schema(
+    name: str,
+    field_info: FieldInfo,
+    schema: Dict[str, Dict]
 ) -> None:
     """
     Populates the schema dictionary with the attribute name and its corresponding type.
@@ -292,13 +305,33 @@ def _populate_schema(
         None
     """
 
-    name = attr.path
-    is_required = attr.is_required()
-    schema[name] = _map_type(
-        attr.annotation,
+    is_required = field_info.is_required()
+    is_complex = _is_complex(field_info.annotation)
+
+    assert name is not None, "Name of attribute cannot be None."
+
+    if name == "id":
+        return
+    elif is_complex:
+        return
+
+    schema[name] = _map_type( # type: ignore
+        field_info.annotation,
         is_required,
     )
 
+def _is_complex(dtype) -> bool:
+    """Checks whether the given data type is a complex sdRDM type."""
+
+    args = get_args(dtype)
+
+    if not args:
+        args = dtype
+
+    return any(
+        hasattr(arg, "model_fields")
+        for arg in args
+    )
 
 def _map_type(
     dtype,
