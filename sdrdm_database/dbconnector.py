@@ -1,22 +1,23 @@
 import os
 import time
+import rich
+import asyncio
 from enum import Enum
 from itertools import cycle
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import ibis
 from ibis.backends.base.sql.alchemy import BaseAlchemyBackend
-from ibis.expr.types.relations import Table
-from pydantic import BaseModel, ConfigDict, PrivateAttr
-from bigtree import Node, find_child_by_name
+from pydantic import BaseModel, ConfigDict, PrivateAttr, model_validator
+from sdRDM import DataModel
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy import create_engine
+from sqlalchemy.orm.session import Session
 
 from sdrdm_database import commands
-from sdrdm_database.dataio import _retrieve_documents, insert_into_database
 from sdrdm_database.modelutils import rebuild_api
 from sdrdm_database.tablecreator import create_tables
-from sdrdm_database.treeutils import get_model_tree
+from sdrdm_database.insert import map_multiple_to_sqlalchemy
 
 
 class SupportedBackends(str, Enum):
@@ -70,17 +71,18 @@ class DBConnector(BaseModel):
     password: Optional[str] = None
     port: int = 5432
     address: Optional[str] = None
-    dbtype: SupportedBackends = SupportedBackends.MYSQL
+    dbtype: Union[str, SupportedBackends] = SupportedBackends.MYSQL
     connection: Optional[BaseAlchemyBackend] = None
     engine: Optional[Any] = None
+    session: Optional[Any] = None
 
-    __sqlalchemy_classes__: Optional[Any] = PrivateAttr(None)
-    __relationships__: Dict[str, Node] = PrivateAttr({})
-    __models__: Dict[str, Any] = PrivateAttr({})
-    __commands__: Optional[commands.MetaCommands] = PrivateAttr(None)
+    _sqlalchemy_classes: Optional[Any] = PrivateAttr(None)
+    _models: Dict[str, Any] = PrivateAttr({})
+    _commands: Optional[commands.MetaCommands] = PrivateAttr(None)
 
-    def __init__(self, **data) -> None:
-        super().__init__(**data)
+    @model_validator(mode="after")  # type: ignore
+    def _initial_setup(self) -> "DBConnector":
+        """Performs initial setup for the DBConnector class."""
 
         if isinstance(self.dbtype, str):
             try:
@@ -94,15 +96,16 @@ class DBConnector(BaseModel):
         self._commands = self._get_commands()
 
         if os.environ.get("TESTING_STAGE") == "unit_tests":
-            return
+            return self
 
         self._connect()
 
-        if "__model_meta__" in self.connection.list_tables():
+        if "__model_meta__" in self.connection.list_tables():  # type: ignore
             self._build_models()
-            self._construct_relation_trees()
 
         print("🎉 Connected")
+
+        return self
 
     def _connect(self):
         """Attempts to connect to the database using the appropriate connection method.
@@ -115,7 +118,7 @@ class DBConnector(BaseModel):
         """
 
         try:
-            self.connection, address = getattr(self, f"_connect_{self.dbtype.value}")()
+            self.connection, address = getattr(self, f"_connect_{self.dbtype.value}")()  # type: ignore
 
         except Exception as e:
             raise ValueError(f"Could not connect to database: {e}") from e
@@ -133,7 +136,7 @@ class DBConnector(BaseModel):
         animation = cycle(list("◐◓◑◒"))
         while not connected:
             try:
-                self.connection.list_tables()
+                self.connection.list_tables()  # type: ignore
                 connected = True
             except Exception as e:
                 if current_time >= timeout:
@@ -151,11 +154,11 @@ class DBConnector(BaseModel):
         print(" " * 100, end="\r")
 
     def _build_models(self):
-        if "__model_meta__" not in self.connection.list_tables():
+        if "__model_meta__" not in self.connection.list_tables():  # type: ignore
             return
 
         model_meta = (
-            self.connection.table("__model_meta__").execute().set_index("table")
+            self.connection.table("__model_meta__").execute().set_index("table")  # type: ignore
         )
 
         # Build root elements first
@@ -175,28 +178,9 @@ class DBConnector(BaseModel):
                 # Multiple primitive table
                 continue
 
-            self.__models__[sub_name] = getattr(root_libs[row.part_of], row.obj_name)
-            self.__models__[row.obj_name] = getattr(
-                root_libs[row.part_of], row.obj_name
-            )
-            self.__models__[name] = getattr(root_libs[row.part_of], row.obj_name)
-
-    def _construct_relation_trees(self):
-        """Generate relationship trees for join queries."""
-
-        model_meta = self.connection.table("__model_meta__").execute()
-        roots = model_meta[model_meta.part_of.isna()]
-
-        for name in roots.table:
-            self.__relationships__[name] = get_model_tree(self, name)
-
-        sub_trees = model_meta[model_meta.part_of.notna()]
-
-        for _, row in sub_trees.iterrows():
-            parent_tree = self.__relationships__[row.part_of]
-            self.__relationships__[row.table] = find_child_by_name(
-                parent_tree, row.table
-            )
+            self._models[sub_name] = getattr(root_libs[row.part_of], row.obj_name)
+            self._models[row.obj_name] = getattr(root_libs[row.part_of], row.obj_name)
+            self._models[name] = getattr(root_libs[row.part_of], row.obj_name)
 
     def _connect_engine(self, address: str):
         """Connect to the database using the SQLAlchemy engine."""
@@ -207,14 +191,29 @@ class DBConnector(BaseModel):
 
     def _automap_classes(self):
         Base = automap_base()
-        Base.prepare(autoload_with=self.engine)
-        self.__sqlalchemy_classes__ = Base.classes
+        Base.prepare(
+            autoload_with=self.engine,
+            name_for_collection_relationship=self._name_for_collection_relationship,
+            name_for_scalar_relationship=self._name_for_scalar_relationship,
+        )
+        self._sqlalchemy_classes = Base.classes
+
+    @staticmethod
+    def _name_for_collection_relationship(base, local_cls, referred_cls, constraint):
+        join_table_name = constraint.table.name
+        splitted = join_table_name.split("_")
+
+        return "_".join(splitted[1:-1])
+
+    @staticmethod
+    def _name_for_scalar_relationship(base, local_cls, referred_cls, constraint):
+        return constraint.name.replace("__fk", "")
 
     def _connect_duckdb(self):
-        if self.address is None and self.dbtype == SupportedBackends.DUCKDB:
-            self.address = f"{self.dbtype.value}://{self.db_name}.ddb"
+        if self.address is None and self.dbtype == SupportedBackends.DUCKDB:  # type: ignore
+            self.address = f"{self.dbtype.value}://{self.db_name}.ddb"  # type: ignore
 
-        return ibis.connect(self.address)
+        return ibis.connect(self.address)  # type: ignore
 
     def _connect_postgres(self):
         assert self.username, "Username must be specified for Postgres"
@@ -270,7 +269,7 @@ class DBConnector(BaseModel):
         }
 
         try:
-            return COMMAND_MAPPER[self.dbtype]
+            return COMMAND_MAPPER[self.dbtype]  # type: ignore
         except KeyError:
             raise ValueError(
                 f"Invalid database type: {self.dbtype}. "
@@ -298,56 +297,96 @@ class DBConnector(BaseModel):
             # Build ORM related stuff
             self._build_models()
             self._automap_classes()
-            self._construct_relation_trees()
+
         except ConnectionRefusedError as e:
             print(
                 "❌ Couldnt connect to database. Please check your credentials or status of the database."
             )
 
     # ! Getters and inserters
-    def insert(self, *datasets: "DataModel", verbose: bool = False):
-        """Inserts data into the database.
+    def insert(
+        self,
+        *datasets: List[DataModel]
+    ):
+        """Inserts a dataset or multiple datasets into the database.
 
         Args:
-            table_name (str): The name of the table to insert the data into.
-            data (dict): The data to insert into the database.
+            datasets (Union[DataModel, List[DataModel]]): The datasets to insert into the database.
+
+        Returns:
+            None
         """
 
-        for dataset in datasets:
-            try:
-                insert_into_database(dataset=dataset, db=self)
+        assert all(
+            isinstance(dataset, DataModel) for dataset in datasets
+        ), "All datasets must be of type DataModel."
 
-                if verbose:
-                    print(
-                        f"Added dataset {dataset.__class__.__name__} ({str(dataset.__id__)})"
-                    )
-            except Exception as e:
-                raise ValueError(f"Could not insert data into database: {e}") from e
+        table_list = self.connection.list_tables() # type: ignore
+        unknown_classes = [
+            dataset.__class__.__name__ for dataset in datasets
+            if dataset.__class__.__name__ not in table_list
+        ]
+
+        if unknown_classes:
+            raise ValueError(
+                f"❌ The following classes are not present in the database: {set(unknown_classes)}"
+            )
+
+        with self.start_session() as session:
+            sql_objs = asyncio.run(
+                map_multiple_to_sqlalchemy(
+                    objs=datasets,
+                    db=self,
+                )
+            )
+
+            session.add_all(sql_objs)
+            session.commit()
+
+            rich.print(f"✅ Inserted {len(datasets)} rows into the database.")
 
     def get(
         self,
-        table_name: str,
-        criteria: Optional[Dict[str, Dict[str, Any]]] = None,
-    ) -> List["DataModel"]:
+        model: Union[str, "DataModel"],  # type: ignore
+        n_rows: Optional[int] = None,
+    ) -> List["DataModel"]:  # type: ignore
         """
         Retrieves rows from the specified table that match the given criteria.
 
         Args:
-            table_name (str): The name of the table to retrieve rows from.
-            criteria (Optional[Dict[str, Dict[str, Any]]]): A dictionary of criteria to filter the rows by.
+            model (Union[str, DataModel]): The model to retrieve rows from.
         Returns:
             List[DataModel]: A list of DataModel objects that contain the retrieved rows.
 
         Raises:
-            ValueError: If the requested model is not registered.
-            AssertionError: If the specified table does not exist.
+            ValueError: If the table does not exist.
+            AssertionError: If the table does not exist.
         """
 
+        from sdRDM import DataModel
+
+        if isinstance(model, str):
+            table_name = model
+        elif issubclass(model, DataModel): # type: ignore
+            table_name = model.__name__
+        else:
+            raise ValueError("Model must be a string or DataModel object.")
+
         assert (
-            table_name in self.connection.list_tables()
+            table_name in self.connection.list_tables()  # type: ignore
         ), f"Table '{table_name}' does not exist."
 
-        return _retrieve_documents(self, table_name, criteria)
+        sql_model = getattr(self._sqlalchemy_classes, table_name)
+        sdrdm_model = self._models[table_name]
+
+        with self.start_session() as sess:
+
+            if n_rows:
+                results = sess.query(sql_model).limit(n_rows).all()
+            else:
+                results = sess.query(sql_model).all()
+
+            return [sdrdm_model.model_validate(row) for row in results]
 
     # ! API Tools
     def get_table_api(self, name: str):
@@ -367,3 +406,8 @@ class DBConnector(BaseModel):
             raise ValueError(f"Requested model '{name}' is not registered.")
 
         return self._models[name]
+
+    # ! Session manager
+    def start_session(self):
+        """Starts a new session with the database."""
+        return Session(bind=self.engine)
