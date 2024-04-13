@@ -1,9 +1,10 @@
 import os
+import pytest
 
 from sdrdm_database import DBConnector
 from sdrdm_database.commands import PostgresCommands, MySQLCommands
 
-
+@pytest.mark.unit
 def test_commands():
     # Set global testing to NOT connect
     os.environ["TESTING_STAGE"] = "unit_tests"
