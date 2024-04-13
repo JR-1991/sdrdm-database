@@ -7,13 +7,12 @@ class MetaCommands(ABC):
     def add_primary_key(
         table_name: str,
         primary_key: str,
-        con: "BaseAlchemyBackend",
+        dbconnector: "BaseAlchemyBackend",
     ):
         pass
 
     @abstractmethod
     def add_foreign_key(
-        self,
         table_name: str,
         foreign_key: str,
         reference_table: str,
@@ -77,7 +76,7 @@ class MySQLCommands(MetaCommands):
                 f"ALTER TABLE {table_name} ADD COLUMN {foreign_key} VARCHAR(36);"
             )
             dbconnector.connection.raw_sql(
-                f"ALTER TABLE {table_name} ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});"
+                f"ALTER TABLE {table_name} ADD CONSTRAINT {foreign_key} FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});"
             )
         except Exception as e:
             print(
@@ -208,7 +207,7 @@ class PostgresCommands(MetaCommands):
     ):
         try:
             dbconnector.connection.raw_sql(
-                f"ALTER TABLE {table_name} ADD FOREIGN KEY ({foreign_key}) REFERENCES {reference_table}({reference_column});"
+                f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ("{foreign_key}") REFERENCES "{reference_table}"("{reference_column}");'
             )
             print(
                 "added constraint",
@@ -232,13 +231,13 @@ class PostgresCommands(MetaCommands):
     ):
         try:
             dbconnector.connection.raw_sql(
-                f"CREATE TABLE {table_name} (id VARCHAR(36) PRIMARY KEY, {table1}_id VARCHAR(36), {table2}_id VARCHAR(36));"
+                f'CREATE TABLE "{table_name}" (id VARCHAR(36) PRIMARY KEY, "{table1}_id" VARCHAR(36), "{table2}_id" VARCHAR(36));'
             )
             dbconnector.connection.raw_sql(
-                f"ALTER TABLE {table_name} ADD FOREIGN KEY ({table1}_id) REFERENCES {table1}(id);"
+                f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ("{table1}_id") REFERENCES "{table1}"(id);'
             )
             dbconnector.connection.raw_sql(
-                f"ALTER TABLE {table_name} ADD FOREIGN KEY ({table2}_id) REFERENCES {table2}(id);"
+                f'ALTER TABLE "{table_name}" ADD FOREIGN KEY ("{table2}_id") REFERENCES "{table2}"(id);'
             )
         except Exception as e:
             print(f"Could not create join table {table_name}: ")
