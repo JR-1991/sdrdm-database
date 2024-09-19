@@ -326,7 +326,7 @@ def _is_complex(dtype) -> bool:
     args = get_args(dtype)
 
     if not args:
-        args = dtype
+        args = [dtype]
 
     return any(
         hasattr(arg, "model_fields")
